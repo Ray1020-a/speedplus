@@ -32,6 +32,7 @@ export class Game {
     this.shake = 0;
     this.rumbleT = 0;
     this.disposed = false;
+    this.look = { yaw: 0, pitch: 0, idle: 0, drag: false };
   }
 
   /* ------------------------------------------------------------ loading */
@@ -97,6 +98,21 @@ export class Game {
     this.hud.setRedline(this.vehicle.redline);
     this.audio?.setListener?.(this.camera.position, new THREE.Vector3(0, 0, -1));
     this.setupAudio();
+    const cv = this.renderer.domElement;
+    cv.style.cursor = 'grab';
+    this._pd = (e) => { if (e.button === 0) { this.look.drag = true; cv.style.cursor = 'grabbing'; } };
+    this._pm = (e) => {
+      if (!this.look.drag) return;
+      this.look.yaw -= e.movementX * 0.006;
+      this.look.pitch = clamp(this.look.pitch + e.movementY * 0.004, -0.5, 0.9);
+      this.look.yaw = clamp(this.look.yaw, -Math.PI, Math.PI);
+      this.look.idle = 0;
+    };
+    this._pu = () => { this.look.drag = false; cv.style.cursor = 'grab'; };
+    cv.addEventListener('pointerdown', this._pd);
+    addEventListener('pointermove', this._pm);
+    addEventListener('pointerup', this._pu);
+    addEventListener('pointercancel', this._pu);
     addEventListener('resize', (this._rs = () => this.resize()));
     this.resize();
     this.state = 'ready';
@@ -272,6 +288,7 @@ export class Game {
 
   resetToTrack() {
     const t = this.track, v = this.vehicle;
+    this.look.yaw = this.look.pitch = 0;
     if (!t.valid) return this.spawn(0);
     const p = t.at(this.sAbs);
     const yaw = Math.atan2(-p.dx, -p.dz);
@@ -559,6 +576,8 @@ export class Game {
 
   updateCamera(dt) {
     const v = this.vehicle, cam = this.camera;
+    const L = this.look;
+    if (!L.drag) { L.idle += dt; if (L.idle > 1.5) { const k = Math.exp(-dt * 3); L.yaw *= k; L.pitch *= k; } }
     const S = this.S;
     const speedF = clamp(v.speedKmh / (v.top * 3.6), 0, 1);
     let fov = 62 + speedF * 22;
@@ -567,9 +586,10 @@ export class Game {
       const dist = (this.view === 0 ? 6.0 : 10.5) * S + speedF * -0.3 * S * 4;
       const height = (this.view === 0 ? 2.0 : 3.6) * S;
       const target = new THREE.Vector3(v.pos.x, v.pos.y + 0.7 * S, v.pos.z);
-      const dir = new THREE.Vector3(Math.sin(this.camYaw), 0, Math.cos(this.camYaw)); // behind the car
-      const want = target.clone().addScaledVector(dir, dist);
-      want.y += height;
+      const yawC = this.camYaw + L.yaw;
+      const dir = new THREE.Vector3(Math.sin(yawC), 0, Math.cos(yawC)); // behind the car
+      const want = target.clone().addScaledVector(dir, dist * Math.cos(L.pitch));
+      want.y += height + dist * Math.sin(L.pitch);
       // keep the camera inside the map
       const to = want.clone().sub(target);
       const len = to.length();
@@ -585,7 +605,7 @@ export class Game {
       off.applyEuler(this.carGroup.root.rotation);
       cam.position.copy(v.pos).add(off);
       const e = this.carGroup.root.rotation;
-      cam.rotation.set(e.x + (this.view === 3 ? 0 : -0.03), e.y, e.z, 'YXZ');
+      cam.rotation.set(e.x + (this.view === 3 ? 0 : -0.03) - L.pitch * 0.6, e.y + L.yaw * 0.8, e.z, 'YXZ');
       cam.position.x += (Math.random() - 0.5) * this.shake * 0.01;
       fov += this.view === 3 ? 12 : 4;
     }
@@ -663,6 +683,11 @@ export class Game {
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
     removeEventListener('resize', this._rs);
+    this.renderer.domElement.removeEventListener('pointerdown', this._pd);
+    removeEventListener('pointermove', this._pm);
+    removeEventListener('pointerup', this._pu);
+    removeEventListener('pointercancel', this._pu);
+    this.renderer.domElement.style.cursor = '';
     if (this.voice) this.audio.destroyEngine(this.voice);
     this.audio?.stopAll?.();
     for (const r of this.remotes.values()) if (r.voice) this.audio.destroyEngine(r.voice);

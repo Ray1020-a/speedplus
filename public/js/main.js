@@ -450,11 +450,13 @@ function togglePause() {
     <h1 class="title">暫停${multi ? ' (比賽持續進行)' : ''}</h1>
     <button class="btn" id="r" autofocus>繼續</button>
     ${multi ? '' : '<button class="btn" id="re">重新開始</button>'}
+    <button class="btn" id="rs">復位到賽道 (R)</button>
     <button class="btn" id="k">遊戲鍵位說明</button>
     <button class="btn" id="q">離開比賽</button></div></div>`);
   game.pauseEl = el;
   el.querySelector('#r').onclick = togglePause;
   el.querySelector('#re')?.addEventListener('click', () => { togglePause(); game.restart(); });
+  el.querySelector('#rs').onclick = () => { togglePause(); game.resetToTrack(); };
   el.querySelector('#k').onclick = () => { el.remove(); keysScreen(() => { document.body.append(el); }, document.body); };
   el.querySelector('#q').onclick = quitToMenu;
   document.body.append(el);
