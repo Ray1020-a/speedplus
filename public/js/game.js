@@ -244,7 +244,7 @@ export class Game {
     let x = cfg.start?.x ?? (this.bounds.min.x + this.bounds.max.x) / 2;
     let z = cfg.start?.z ?? (this.bounds.min.z + this.bounds.max.z) / 2;
     let yaw = cfg.start?.yaw ?? 0;
-    if (t.valid && cfg.start) {
+    if (t.valid && cfg.start && !cfg.start.manual) {
       const p = t.at(t.s0);
       yaw = Math.atan2(-p.dx, -p.dz);
       x = p.x; z = p.z;

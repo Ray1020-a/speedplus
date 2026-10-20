@@ -387,7 +387,7 @@ function snapGate(name, x, z) {
     const p = t.project(x, z);
     const a = t.at(p.s);
     g.x = a.x; g.z = a.z;
-    g.yaw = Math.atan2(-a.dx, -a.dz);
+    if (!g.manual) g.yaw = Math.atan2(-a.dx, -a.dz);
   }
   c[name] = g;
 }
@@ -401,6 +401,7 @@ function mapPointer() {
     if (e.button === 1 || e.button === 2 || e.shiftKey) { mv.pan = { sx, sy, cx: mv.cam.x, cz: mv.cam.z }; return; }
     const [wx, wz] = mv.toWorld(sx, sy);
     const c = cur.cfg;
+    if (mv.rotating) { mv.rotating = false; $('#tip2') && ($('#tip2').textContent = ''); return; }
     if (mv.tool === 'select') {
       const h = mv.hit(sx, sy);
       if (h) mv.drag = h;
@@ -420,6 +421,11 @@ function mapPointer() {
       mv.cam.x = mv.pan.cx - (sx - mv.pan.sx) / mv.cam.k;
       mv.cam.z = mv.pan.cz - (sy - mv.pan.sy) / mv.cam.k;
       mv.syncCam();
+      return;
+    }
+    if (mv.rotating) {
+      const g = cur.cfg.start;
+      if (g) { g.yaw = Math.atan2(-(wx - g.x), -(wz - g.z)); g.manual = true; }
       return;
     }
     const d = mv.drag;
@@ -445,6 +451,7 @@ function mapPointer() {
     const r = ov.getBoundingClientRect();
     const h = mv.hit(e.clientX - r.left, e.clientY - r.top);
     if (h?.type === 'pt') cur.cfg.track.points.splice(h.i, 1);
+    else if (h?.type === 'start') { mv.rotating = true; mv.drag = null; $('#tip2').textContent = '旋轉起點：移動滑鼠指向車頭方向，單擊確定'; }
   };
   ov.oncontextmenu = (e) => e.preventDefault();
   ov.onwheel = (e) => {
@@ -502,6 +509,8 @@ function mapPanel(box) {
     text('名稱', () => c.name, (v) => (c.name = v)),
     h3('工具'),
     row('', ...tools.map(([k, t]) => btn(t, () => { mv.tool = k; mapPanel(box); }, mv.tool === k ? 'on' : ''))),
+    row('', btn('起點方向改回自動', () => { if (c.start) { c.start.manual = false; snapGate('start', c.start.x, c.start.z); } })),
+    hint('起點：選取工具下雙擊起點可自由旋轉方向（移動滑鼠、單擊確定）。'),
     hint('畫賽道：在地圖上按住拖曳 (或單擊加點)；沿行駛方向畫。起點/終點會自動吸附到賽道上。'),
     row('', btn('清除賽道', () => { c.track.points = []; }), btn('反向', () => { c.track.points.reverse(); if (c.start) snapGate('start', c.start.x, c.start.z); }), btn('縮放全圖', () => mv.fit())),
     h3('賽道'),
