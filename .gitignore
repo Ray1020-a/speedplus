@@ -1,0 +1,9 @@
+node_modules/
+*.glb
+*.gltf
+models/
+data/*.db
+data/*.db-*
+.env
+logs/
+.DS_Store

@@ -1,0 +1,30 @@
+{
+  "name": "speedplus",
+  "version": "1.0.0",
+  "description": "Speed+ browser racing game",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ray1020-a/speedplus.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Ray1020-a/speedplus/issues"
+  },
+  "homepage": "https://github.com/Ray1020-a/speedplus#readme",
+  "dependencies": {
+    "express": "^5.3.0",
+    "three": "^0.186.1",
+    "three-mesh-bvh": "^0.9.16",
+    "ws": "^8.22.0"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}
