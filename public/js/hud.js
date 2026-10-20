@@ -40,6 +40,7 @@ export class Hud {
       <div class="hud-center" id="h-msg"></div>
       <div class="hud-warn" id="h-warn">逆向行駛</div>
       <div class="hud-view" id="h-view"></div>
+      <div class="hud-hold" id="h-hold"><div id="h-hold-t"></div><div class="hb"><i id="h-hold-b"></i></div></div>
       <canvas class="hud-map" id="h-map" width="360" height="360"></canvas>
       <div class="hud-speedo" id="h-speedo"></div>
       <div class="touch" id="touch"></div>`;
@@ -118,6 +119,15 @@ export class Hud {
     v.classList.remove('flash');
     void v.offsetWidth;
     v.classList.add('flash');
+  }
+  /** progress 0..1 shows the hold-to-start bar; null hides it */
+  hold(progress, text, noBar = false) {
+    const e = this.$('h-hold');
+    if (progress == null) { e.classList.remove('on'); return; }
+    e.classList.add('on');
+    e.classList.toggle('nobar', noBar);
+    this.$('h-hold-t').textContent = text;
+    this.$('h-hold-b').style.width = `${Math.min(1, progress) * 100}%`;
   }
   warn(on) { this.$('h-warn').classList.toggle('on', on); }
 

@@ -403,10 +403,17 @@ function runGame() {
   window.__game = game;
   game.onPause = () => togglePause();
   game.onFinish = (res) => finished(res);
-  game.begin(3500);
+  const multi = game.mode === 'multi';
+  game.canStart = !multi || room.isHost;
+  game.onStartRequest = () => {
+    if (multi) room.broadcast({ t: 'go' });
+    game.begin(3500);
+  };
+  game.waitStart();
+  if (pendingGo) { pendingGo = false; game.begin(3500); }
 }
 
-let startData = null;
+let pendingGo = false;
 async function startMulti(m) {
   const r = room.roster;
   const players = m.order.map((id) => r.players.find((p) => p.id === id)).filter(Boolean);
@@ -417,26 +424,18 @@ async function startMulti(m) {
   const myChar = data.char.find((c) => c.id === me.character) || S.char;
   const progress = loadingScreen('等待所有玩家…');
   const ready = new Set();
-  let goResolve;
-  const goPromise = new Promise((res) => (goResolve = res));
-  const others = () => players.filter((p) => p.id !== room.id && room.peers.has(p.id)).map((p) => p.id);
-  const maybeGo = () => {
-    if (room.isHost && others().every((id) => ready.has(id))) { room.broadcast({ t: 'go' }); goResolve(); }
-  };
+  pendingGo = false;
   room.on.data = (id, msg) => {
-    if (msg.t === 'ready') { ready.add(id); maybeGo(); }
-    else if (msg.t === 'go') goResolve();
+    if (msg.t === 'ready') ready.add(id);
+    else if (msg.t === 'go') { if (game?.state === 'waiting') game.begin(3500); else pendingGo = true; }
     else game?.onNet(id, msg);
   };
   try {
     game = await createGame({ mode: 'multi', map, car: myCar, character: myChar, mt: me.mt, laps: r.setup.laps, room, players }, progress);
   } catch (e) { console.error(e); room.leave(); room = null; return loadFailed(e); }
   game.initNet();
+  game.waitText = () => (room.isHost ? `已就緒 ${ready.size + 1}/${players.length}　長按 空白鍵 1.5 秒開始比賽` : '');
   room.broadcast({ t: 'ready' });
-  maybeGo();
-  loadingScreen('等待其他玩家載入…');
-  await Promise.race([goPromise, new Promise((res) => setTimeout(res, room.isHost ? 25000 : 40000))]);
-  if (room.isHost) room.broadcast({ t: 'go' });
   runGame();
 }
 
@@ -610,6 +609,7 @@ function setupTouch() {
   btn('steer', '▶', () => (t.right = true), () => (t.right = false)).style.left = 'calc(max(20px,env(safe-area-inset-left)) + min(22vh,110px) + 14px)';
   btn('gas', 'GAS', () => (t.gas = true), () => (t.gas = false));
   btn('brk', 'BRAKE', () => (t.brake = true), () => (t.brake = false));
+  btn('start', '按住開始', () => (t.hold = true), () => (t.hold = false));
   btn('hand', 'DRIFT', () => (t.hand = true), () => (t.hand = false));
   const top = (label, off, fn) => { const b = btn('sm', label, fn); b.style.top = '10px'; b.style.left = `calc(50% + ${off}px)`; return b; };
   top('⏸', -82, () => (input.edge.pause = true));

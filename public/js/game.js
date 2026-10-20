@@ -300,6 +300,8 @@ export class Game {
 
   /* ------------------------------------------------------------ run */
   begin(countdownMs = 3500) {
+    this.hud.root.classList.add('started');
+    this.hud.hold(null);
     this.hud.setMode(this.mode === 'lap' ? '繞圈賽 · 10 分鐘' : this.mode === 'time' ? '計時賽' : `多人競速 · ${this.laps} 圈`);
     this.state = 'countdown';
     this.cdEnd = performance.now() + countdownMs;
@@ -312,7 +314,17 @@ export class Game {
   restart() {
     this.removeAllHits();
     this.spawn(0);
-    this.begin(3000);
+    this.waitStart();
+  }
+
+  /** Grid is shown; the countdown only starts once the starter holds Space for 1.5 s. */
+  waitStart() {
+    this.state = 'waiting';
+    this.hold = 0;
+    this.hud.root.classList.remove('started');
+    this.hud.setMode(this.mode === 'lap' ? '繞圈賽 · 10 分鐘' : this.mode === 'time' ? '計時賽' : `多人競速 · ${this.laps} 圈`);
+    this.clock.start();
+    this.renderer.setAnimationLoop(() => this.frame());
   }
   removeAllHits() { this.vehicle.events.length = 0; }
 
@@ -330,7 +342,16 @@ export class Game {
 
     const now = performance.now();
     const paused = this.paused && this.mode !== 'multi';
-    if (this.state === 'countdown') {
+    if (this.state === 'waiting') {
+      const v = this.vehicle;
+      v.rpm += (v.idle - v.rpm) * Math.min(1, dt * 4);
+      if (this.canStart) {
+        const held = this.input.keys.has('Space') || this.input.touch.hold;
+        this.hold = held ? this.hold + dt : Math.max(0, this.hold - dt * 2);
+        this.hud.hold(this.hold / 1.5, this.waitText?.() || '長按 空白鍵 1.5 秒開始');
+        if (this.hold >= 1.5) { this.hold = 0; this.hud.hold(null); this.onStartRequest?.(); }
+      } else this.hud.hold(0, '等待主辦人開始…', true);
+    } else if (this.state === 'countdown') {
       const left = this.cdEnd - now;
       const n = Math.ceil(left / 1000);
       if (n !== this.cdLast && n <= 3 && n > 0) { this.cdLast = n; this.hud.msg(String(n), 'big', 900); this.audio?.beep(520, 0.15); }

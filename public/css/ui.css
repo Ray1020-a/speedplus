@@ -110,3 +110,10 @@ body.is-touch .hud-map{width:min(130px,17vw);height:min(130px,17vw);bottom:auto;
 #rotate{position:fixed;inset:0;background:#05090f;z-index:50;display:none;place-items:center;text-align:center;font-size:26px;font-weight:800}
 @media (orientation:portrait) and (pointer:coarse){#rotate{display:grid}}
 @media (max-height:520px){.screen{padding:14px 26px}.menu{margin-top:12px;gap:6px}.btn{padding:9px 18px;font-size:16px}.brand{font-size:44px}.cards{padding:8px 4px 12px;margin:4px 0}.card{padding:10px}.card h3{font-size:18px}h1.title{font-size:22px}.code{font-size:36px}}
+
+.hud-hold{position:absolute;left:50%;top:36%;transform:translateX(-50%);text-align:center;font-size:26px;font-weight:800;font-style:italic;text-shadow:0 3px 14px #000;display:none;min-width:320px}
+.hud-hold.on{display:block}
+.hud-hold .hb{height:10px;background:#fff3;border-radius:5px;margin-top:10px;overflow:hidden}.hud-hold .hb i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc2),var(--acc))}
+.hud-hold.nobar .hb{display:none}
+.started .tb.start{display:none}
+.tb.start{left:50%;transform:translateX(-50%);top:46%;width:min(26vh,120px);height:min(26vh,120px);font-size:16px;text-align:center}

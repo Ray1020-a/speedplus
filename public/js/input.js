@@ -16,7 +16,7 @@ export const PAD_MAP = [
 export class Input {
   constructor() {
     this.keys = new Set();
-    this.touch = { left: false, right: false, gas: false, brake: false, hand: false };
+    this.touch = { left: false, right: false, gas: false, brake: false, hand: false, hold: false };
     this.edge = { up: false, down: false, view: false, reset: false, pause: false, mute: false };
     this.steer = 0; // smoothed keyboard steering
     this.pad = null;
