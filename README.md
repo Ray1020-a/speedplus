@@ -58,7 +58,7 @@ models/characters/*.glb   (可選；內建 4 位程式產生的車手)
 
 ## 音效
 
-引擎聲為 WebAudio 即時合成（V6 渦輪混動風格，隨轉速/油門變化）。若想換成真實錄音（例如 SF26 聲浪），把可循環播放的檔案放到 `public/audio/engine.mp3`，並在 `public/js/game.js` 的 `setupAudio` 前呼叫 `audio.loadSample('/audio/engine.mp3')`、設定 `audio.sampleRef`（取樣時的轉速）即可；請自行確認音檔授權。
+引擎聲為 WebAudio 即時合成（V6 渦輪混動風格，隨轉速/油門變化）。若想換成真實錄音（例如 SF26 聲浪），把可循環播放的檔案放到 `public/audio/engine.mp3`，遊戲會自動改用它（播放速度隨轉速變化，預設以 8000 rpm 錄音為基準，可調 `GameAudio.sampleRef`）。請自行確認音檔授權；我沒有內建來路不明的音檔。
 
 ## 部署到 Debian（pm2）
 

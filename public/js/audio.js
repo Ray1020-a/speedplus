@@ -22,6 +22,7 @@ export class GameAudio {
     this.noiseBuf = this.makeNoise();
     this.curve = this.makeCurve(3.5);
     await this.ctx.resume();
+    await this.loadSample('/audio/engine.mp3'); // optional real recording; synth is used when absent
   }
 
   makeNoise() {
