@@ -98,7 +98,7 @@ kbd{background:#fff;color:#111;border-radius:4px;padding:1px 7px;font-weight:700
 /* touch controls */
 .touch{position:absolute;inset:0;display:none}
 body.is-touch .touch{display:block}
-body.is-touch .hud-speedo{right:50%;transform:translateX(50%);width:min(250px,30vw);bottom:2px}
+body.is-touch .hud-speedo{right:50%;transform:translateX(50%);width:min(230px,27vw);bottom:0}
 body.is-touch .hud-map{width:min(130px,17vw);height:min(130px,17vw);bottom:auto;top:96px}
 .tb{position:absolute;display:grid;place-items:center;background:rgba(10,16,28,.55);border:2px solid #fff4;border-radius:50%;font-weight:900;font-style:italic;font-size:20px;color:#fff;touch-action:none;user-select:none}
 .tb.on{background:rgba(255,176,32,.75);color:#111}

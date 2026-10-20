@@ -92,20 +92,31 @@ function charObject(asset, pose) {
 function showCharPreview(asset) {
   if (!asset) return;
   const ch = charObject(asset);
-  ch.group.scale.setScalar(1.7);
-  preview.show(ch.group, { radius: 1.6, lift: 1.7 * 0.95 });
+  preview.show(ch.group, { radius: 1.5, lift: 0.95, lookY: 0.95 });
+}
+/** Stand-in shown until the real model has been downloaded. */
+function placeholderCar() {
+  const g = new THREE.Group();
+  const paint = new THREE.MeshStandardMaterial({ color: 0xc8102e, roughness: 0.35, metalness: 0.3 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x15181d, roughness: 0.7 });
+  const add = (geo, m, x, y, z, rx = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, 0, rz); g.add(o); return o; };
+  add(new THREE.BoxGeometry(0.55, 0.3, 3.2), paint, 0, 0.3, -0.2);
+  add(new THREE.BoxGeometry(0.4, 0.22, 1.5), paint, 0, 0.27, -2.0);
+  add(new THREE.BoxGeometry(1.8, 0.05, 0.5), dark, 0, 0.12, -2.65);
+  add(new THREE.BoxGeometry(1.5, 0.45, 0.06), dark, 0, 1.0, 2.5);
+  add(new THREE.BoxGeometry(1.2, 0.18, 0.7), paint, 0, 0.35, 0.9);
+  for (const [x, z, r] of [[-0.95, -1.7, 0.33], [0.95, -1.7, 0.33], [-0.95, 1.75, 0.37], [0.95, 1.75, 0.37]]) add(new THREE.CylinderGeometry(r, r, 0.4, 24), dark, x, r, z, 0, Math.PI / 2);
+  return g;
 }
 const carSceneCache = new Map();
 async function showCarPreview(asset, charAsset) {
   if (!asset) return;
   const token = (showCarPreview.t = (showCarPreview.t || 0) + 1);
   if (!(await isCached(asset.url))) {
-    const ch = charObject(charAsset, { torso: -20, arm: 50, elbow: 30, thigh: 80, knee: 15, head: 20 });
-    ch.group.scale.setScalar(1.7);
-    ch.group.position.y = 0.6;
-    const g = new THREE.Group();
-    g.add(ch.group);
-    if (token === showCarPreview.t) preview.show(g, { radius: 1.6 });
+    const g = placeholderCar();
+    const ch = charObject(charAsset, asset.config.pose);
+    seatDriver(g, ch, asset.config);
+    if (token === showCarPreview.t) preview.show(g, { radius: 2.9 });
     return;
   }
   let scene = carSceneCache.get(asset.url);
@@ -292,6 +303,7 @@ function multiEntry(err = '') {
       const info = { name: n, car: S.car.id, character: S.char.id, mt: S.mt };
       if (join) await room.join({ ...info, code }); else await room.create({ ...info, map: S.map.id, laps: S.map.config.laps });
       S.joinCode = null;
+      window.__room = room;
       lobby();
     } catch (e) { room?.leave(); room = null; fail(e.message); }
   };
@@ -462,6 +474,7 @@ function quitToMenu() {
 
 async function finished(res) {
   game.paused = true;
+  hudEl.classList.add('hidden');
   if (res.mode === 'multi') return multiResult(res);
   const mapId = S.map.id;
   const recMode = res.mode;
@@ -471,8 +484,8 @@ async function finished(res) {
     try { isRecord = (await api.post('/api/records', { map_id: mapId, car_id: S.car.id, mode: recMode, score, check: true })).isRecord; } catch { /* offline */ }
   }
   const summary = recMode === 'time'
-    ? `<div class="code" style="font-size:44px">${fmtTime(res.ms)}</div>`
-    : `<div class="code" style="font-size:44px">${res.score.toFixed(2)} 圈</div>`;
+    ? `<div class="code" style="font-size:44px;letter-spacing:.05em">${fmtTime(res.ms)}</div>`
+    : `<div class="code" style="font-size:44px;letter-spacing:.05em">${res.score.toFixed(2)} 圈</div>`;
   const el = h(`<div class="screen full"><div class="step">${recMode === 'time' ? 'TIME ATTACK' : '10 MIN LAP RACE'} · ${esc(S.map.name)}</div><h1 class="title">${isRecord ? '🏆 新紀錄！' : '完賽'}</h1>
     ${summary}<div style="color:var(--dim)">最佳單圈 ${fmtTime(res.bestLap)}</div>
     <div id="rec" style="margin:14px 0"></div>
@@ -485,7 +498,7 @@ async function finished(res) {
     el.querySelector('#lb').innerHTML = `<tr><th>#</th><th>玩家</th><th>賽車</th><th>${recMode === 'time' ? '時間' : '圈數'}</th></tr>` +
       rows.slice(0, 10).map((r, i) => `<tr class="${hl && r.created === hl ? 'me' : ''}"><td>${i + 1}</td><td>${esc(r.player)}</td><td>${esc(carName(r.car_id))}</td><td>${recMode === 'time' ? fmtTime(r.score) : r.score.toFixed(2)}</td></tr>`).join('');
   };
-  el.querySelector('#again').onclick = () => { el.remove(); game.restart(); };
+  el.querySelector('#again').onclick = () => { el.remove(); hudEl.classList.remove('hidden'); game.paused = false; game.restart(); };
   el.querySelector('#menu').onclick = () => { el.remove(); quitToMenu(); };
   document.body.append(el);
   el.style.cssText += ';position:fixed;z-index:20;overflow:auto';
@@ -596,13 +609,14 @@ function setupTouch() {
   btn('gas', 'GAS', () => (t.gas = true), () => (t.gas = false));
   btn('brk', 'BRAKE', () => (t.brake = true), () => (t.brake = false));
   btn('hand', 'DRIFT', () => (t.hand = true), () => (t.hand = false));
-  const top = (label, right, fn) => { const b = btn('sm', label, fn); b.style.top = '96px'; b.style.right = right; return b; };
-  top('👁', '14px', () => (input.edge.view = true));
-  top('↺', '68px', () => (input.edge.reset = true));
-  top('⏸', '122px', () => (input.edge.pause = true));
+  const top = (label, off, fn) => { const b = btn('sm', label, fn); b.style.top = '10px'; b.style.left = `calc(50% + ${off}px)`; return b; };
+  top('⏸', -82, () => (input.edge.pause = true));
+  top('↺', -26, () => (input.edge.reset = true));
+  top('👁', 30, () => (input.edge.view = true));
   if (game?.mt) {
-    const u = btn('sm', 'UP', () => (input.edge.up = true)); u.style.right = '14px'; u.style.top = '156px'; u.style.width = u.style.height = '56px';
-    const d = btn('sm', 'DN', () => (input.edge.down = true)); d.style.right = '14px'; d.style.top = '222px'; d.style.width = d.style.height = '56px';
+    const mk = (label, left, fn) => { const x = btn('sm', label, fn); x.style.left = left; x.style.bottom = 'calc(max(20px,env(safe-area-inset-bottom)) + min(22vh,110px) + 14px)'; x.style.top = 'auto'; x.style.width = x.style.height = '56px'; };
+    mk('DN', 'max(20px,env(safe-area-inset-left))', () => (input.edge.down = true));
+    mk('UP', 'calc(max(20px,env(safe-area-inset-left)) + 70px)', () => (input.edge.up = true));
   }
 }
 

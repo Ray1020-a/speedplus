@@ -40,7 +40,7 @@ export class Preview {
   }
 
   /** Show an object. size = rough bounding radius used to frame the camera. */
-  show(obj, { radius = 2, lift = 0 } = {}) {
+  show(obj, { radius = 2, lift = 0, lookY = 0.5 } = {}) {
     if (this.subject) this.pivot.remove(this.subject);
     this.subject = obj;
     if (obj) {
@@ -48,8 +48,9 @@ export class Preview {
       this.pivot.add(obj);
       obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
     }
-    this.dist = radius * 3.4;
-    this.height = radius * 0.55;
+    this.dist = radius * 3.3;
+    this.height = radius * 0.3;
+    this.lookY = lookY;
     this.ring.scale.setScalar(radius / 2.2);
   }
 
@@ -84,8 +85,8 @@ export class Preview {
     this.pivot.rotation.y = this.rot;
     this.ring.rotation.z = -this.rot * 0.5;
     const a = 0.5;
-    this.camera.position.set(Math.sin(a) * this.dist, this.height + 0.6, Math.cos(a) * this.dist);
-    this.camera.lookAt(0, this.height * 0.5, 0);
+    this.camera.position.set(Math.sin(a) * this.dist, this.height + this.lookY * 0.6, Math.cos(a) * this.dist);
+    this.camera.lookAt(0, this.lookY, 0);
     this.renderer.render(this.scene, this.camera);
   }
 }

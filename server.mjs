@@ -47,6 +47,12 @@ const defaultMap = (name) => ({
 });
 const defaultCharacter = (name, c) => ({ name, type: 'procedural', ...c });
 
+/* ---------- tuned configs shipped with the repo (seed/<model name>.json) ---------- */
+function seedFor(file) {
+  const p = path.join(ROOT, 'seed', file.replace(/\.[^.]+$/, '') + '.json');
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return {}; }
+}
+
 /* ---------- scan models folders -> DB ---------- */
 const slug = (f) => f.replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '_').toLowerCase();
 function scanModels() {
@@ -55,7 +61,8 @@ function scanModels() {
       if (!/\.(glb|gltf)$/i.test(f)) continue;
       if (assets.byFile(kind, f)) continue;
       const name = f.replace(/\.[^.]+$/, '');
-      const cfg = kind === 'car' ? defaultCar(name) : kind === 'map' ? defaultMap(name) : { name, type: 'glb', scale: 1 };
+      const base = kind === 'car' ? defaultCar(name) : kind === 'map' ? defaultMap(name) : { name, type: 'glb', scale: 1 };
+      const cfg = { ...base, ...seedFor(f) };
       assets.upsert(kind, slug(f), name, f, cfg);
       console.log(`[scan] ${kind}: ${f}`);
     }
