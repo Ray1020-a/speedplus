@@ -27,13 +27,14 @@ const defaultCar = (name) => ({
   bodyBox: [1.9, 0.9, 5.4], // collision box (w,h,l), centered on car origin
   power: 1.0,
   topSpeed: 340, // km/h
-  gears: [0, 13, 9.4, 7.2, 5.8, 4.8, 4.1], // 1..6 = ratio helper (see client/car.js)
+  gearCount: 8,
   redline: 15000,
   sound: { type: 'f1' },
 });
 const defaultMap = (name) => ({
   name,
   carScale: 0.25,      // scale cars down so they fit the map
+  maxSpeed: 160,       // km/h cap (virtual) so small maps stay playable
   hide: 'ceil',        // meshes whose names match this regex are hidden (ceilings)
   noCollide: 'glass|lamp',
   laps: 3,

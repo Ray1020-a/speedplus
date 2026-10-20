@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0a0f18">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Speed+ 賽車</title>
+<link rel="stylesheet" href="/css/ui.css">
+<script type="importmap">
+{ "imports": {
+  "three": "/vendor/three/build/three.module.js",
+  "three/addons/": "/vendor/three/examples/jsm/",
+  "three-mesh-bvh": "/vendor/three-mesh-bvh/build/index.module.js"
+} }
+</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="hud" class="hidden"></div>
+<div id="ui"></div>
+<div id="rotate"><div>請將裝置橫放<br><small>Rotate your device to landscape</small></div></div>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>
