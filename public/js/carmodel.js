@@ -14,7 +14,21 @@ export function buildCar(scene, cfg) {
   const box = new THREE.Box3().setFromObject(outer);
   const c = box.getCenter(new THREE.Vector3());
   inner.position.set(-c.x, -box.min.y, -c.z);
-  outer.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  outer.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = true;
+    o.receiveShadow = true;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      // transmission re-renders the whole scene into an offscreen buffer every frame; fake glass with alpha instead
+      if (m?.transmission > 0) {
+        m.transmission = 0;
+        m.transparent = true;
+        m.opacity = Math.min(m.opacity, 0.35);
+        m.depthWrite = false;
+        m.needsUpdate = true;
+      }
+    }
+  });
   outer.userData.size = box.getSize(new THREE.Vector3());
   return outer;
 }
