@@ -11,6 +11,7 @@ import { makeCharacter } from './characters.js';
 import { buildCar, seatDriver } from './carmodel.js';
 import { downloadModel, parseGLB } from './loader.js';
 import { settings, saveSettings } from './settings.js';
+import { profile, levelOf, xpForLevel, award, medalFor, parTimes, ACHIEVEMENTS, MEDAL_TEXT } from './profile.js';
 
 const $ui = document.getElementById('ui');
 const touch = isTouchDevice();
@@ -185,15 +186,18 @@ function title() {
     <div class="brand">SPEED<b>+</b></div>
     <div class="menu">
       <button class="btn" id="start" autofocus>開始</button>
+      <button class="btn" id="career">生涯 · 成就</button>
       <button class="btn" id="rank">全服排行榜</button>
       <button class="btn" id="keys">遊戲鍵位說明</button>
       <button class="btn" id="set">設定</button>
     </div>
     <div class="spacer"></div>
+    ${careerChip()}
     <div class="row" style="color:var(--dim);font-size:13px"><span id="padinfo"></span><span class="spacer"></span><a href="/admin.html" style="color:var(--dim)">管理後台</a></div>
   </div>`);
   el.querySelector('#start').onclick = async () => { await audio.init(); if (touch) document.documentElement.requestFullscreen?.().catch(() => {}); if (S.joinCode) S.multi = true; pickChar(); };
-  el.querySelector('#rank').onclick = rankScreen;
+  el.querySelector('#rank').onclick = () => rankScreen();
+  el.querySelector('#career').onclick = careerScreen;
   el.querySelector('#keys').onclick = () => keysScreen(title);
   el.querySelector('#set').onclick = () => settingsScreen();
   input.onPad = (on, id) => { const p = el.querySelector('#padinfo'); if (p) p.textContent = on ? `🎮 已連接：${id}` : ''; };
@@ -557,11 +561,16 @@ async function finished(res) {
   if (score > 0 && (recMode === 'time' || res.laps >= 1 || res.score > 0.05)) {
     try { isRecord = (await api.post('/api/records', { map_id: mapId, car_id: S.car.id, mode: recMode, score, check: true })).isRecord; } catch { /* offline */ }
   }
+  const par = parTimes(game);
+  const medal = medalFor(res, game);
+  const rw = award(res, { mapId, medal, drift: res.drift, driftBest: res.driftBest, hits: res.hits });
   const summary = recMode === 'time'
     ? `<div class="code" style="font-size:44px;letter-spacing:.05em">${fmtTime(res.ms)}</div>`
     : `<div class="code" style="font-size:44px;letter-spacing:.05em">${res.score.toFixed(2)} 圈</div>`;
   const el = h(`<div class="screen full"><div class="step">${recMode === 'time' ? 'TIME ATTACK' : '10 MIN LAP RACE'} · ${esc(S.map.name)}</div><h1 class="title">${isRecord ? '🏆 新紀錄！' : '完賽'}</h1>
     ${summary}<div style="color:var(--dim)">最佳單圈 ${fmtTime(res.bestLap)}</div>
+    ${rewardHtml(rw)}
+    <div style="color:var(--dim);font-size:12px">${recMode === 'time' ? `金牌 ${fmtTime(par.gold)} · 銀牌 ${fmtTime(par.silver)} · 銅牌 ${fmtTime(par.bronze)}` : ''}</div>
     <div id="rec" style="margin:14px 0"></div>
     <div class="panel scroll" style="max-height:36vh;width:min(560px,92vw)"><table class="t" id="lb"></table></div>
     <div class="spacer"></div>
@@ -596,9 +605,12 @@ async function finished(res) {
 
 function multiResult(res) {
   const rows = res.rows;
+  const place = rows.findIndex((r) => r.id === res.me) + 1;
+  const rw = award({ mode: 'multi', laps: game?.lapsDone || 0, ms: game?.finishMs || 0 }, { mapId: game?.map?.id, place, players: rows.length, drift: game?.drift.total, driftBest: game?.drift.best, hits: game?.hits });
   const el = h(`<div class="screen full"><div class="step">RACE RESULT</div><h1 class="title">比賽結果</h1>
     <div class="panel scroll" style="max-height:56vh;width:min(560px,92vw)"><table class="t"><tr><th>#</th><th>玩家</th><th>成績</th></tr>
     ${rows.map((r, i) => `<tr class="${r.id === res.me ? 'me' : ''}"><td>${i + 1}</td><td>${esc(r.name)}</td><td>${r.text}</td></tr>`).join('')}</table></div>
+    ${rewardHtml(rw)}
     <div class="spacer"></div><div class="row"><button class="btn" id="back" autofocus>${room.isHost ? '返回房間' : '等待房主…'}</button><button class="btn ghost" id="leave">離開</button></div></div>`);
   document.body.append(el);
   el.style.cssText += ';position:fixed;z-index:20;overflow:auto';
@@ -618,6 +630,44 @@ function multiResult(res) {
     room.on.roster = (r) => { if (r.state === 'lobby') toLobby(); else prev?.(r); };
   }
   el.querySelector('#leave').onclick = () => { el.remove(); quitToMenu(); };
+}
+
+/* ---------------------------------------------------------------- career */
+function careerChip() {
+  const lv = levelOf(profile.xp);
+  const a = xpForLevel(lv), b = xpForLevel(lv + 1);
+  return `<div class="chip"><div class="lv">${lv}</div><div class="chip-body"><div class="chip-top"><span>車手等級</span><b>${profile.credits.toLocaleString()} CR</b></div><div class="bar"><i style="width:${((profile.xp - a) / (b - a)) * 100}%"></i></div></div></div>`;
+}
+const medalDot = (m) => `<span class="medal m${m}">${m ? MEDAL_TEXT[['', 'bronze', 'silver', 'gold'][m]] : '—'}</span>`;
+
+function careerScreen() {
+  const st = profile.stats;
+  const mapsRows = data.map.map((m) => `<tr><td>${esc(m.config.name || m.name)}</td><td>${medalDot(profile.medals[m.id + '|time'] || 0)}</td><td>${medalDot(profile.medals[m.id + '|lap'] || 0)}</td></tr>`).join('');
+  const el = h(`<div class="screen full"><div class="step">CAREER</div><h1 class="title">生涯 · 成就</h1>
+    <div class="career scroll">
+      <div>${careerChip()}
+        <div class="keys" style="grid-template-columns:1fr;margin-top:14px">
+          <div><span>完成比賽</span><b>${st.races}</b></div><div><span>多人勝場</span><b>${st.wins}</b></div>
+          <div><span>累計圈數</span><b>${st.laps}</b></div><div><span>漂移總分</span><b>${Math.round(st.driftTotal).toLocaleString()}</b></div>
+          <div><span>最高漂移連鎖</span><b>${Math.round(st.driftBest).toLocaleString()}</b></div><div><span>碰撞次數</span><b>${st.hits}</b></div>
+        </div>
+        <table class="t" style="margin-top:14px"><tr><th>地圖</th><th>計時賽</th><th>繞圈賽</th></tr>${mapsRows}</table></div>
+      <div class="achs">${ACHIEVEMENTS.map((a) => `<div class="ach ${profile.ach[a.id] ? 'on' : ''}"><i>${profile.ach[a.id] ? '★' : '☆'}</i><div><b>${a.name}</b><span>${a.desc}</span></div></div>`).join('')}</div>
+    </div>
+    <div class="spacer"></div><div class="row"><button class="btn" id="b" autofocus>← 返回</button></div></div>`);
+  el.querySelector('#b').onclick = title;
+  screen(el, { Escape: title });
+}
+
+function rewardHtml(rw) {
+  return `<div class="rewards">
+    ${rw.medal ? `<div class="medalbig m${rw.medal}">${MEDAL_TEXT[['', 'bronze', 'silver', 'gold'][rw.medal]]}${rw.medalUp ? ' <small>NEW</small>' : ''}</div>` : ''}
+    <div class="rw"><span>獎勵積分</span><b>+${rw.credits.toLocaleString()} CR</b></div>
+    <div class="rw"><span>經驗值</span><b>+${rw.xp} XP</b></div>
+    ${rw.drift ? `<div class="rw"><span>漂移分數</span><b>${Math.round(rw.drift).toLocaleString()}</b></div>` : ''}
+    ${rw.levelUp ? `<div class="levelup">LEVEL UP！ Lv.${rw.level}</div>` : ''}
+    ${rw.unlocked.map((a) => `<div class="levelup" style="color:var(--acc2)">★ 成就解鎖：${a.name}</div>`).join('')}
+  </div>`;
 }
 
 /* ---------------------------------------------------------------- misc screens */

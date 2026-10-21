@@ -148,3 +148,41 @@ input[type=range]{width:100%;accent-color:var(--acc);height:28px}
 .btn:active{transform:translateX(6px) scale(.98)}
 @media (prefers-reduced-motion:reduce){.screen,.pause{animation:none}.btn,.card{transition:none}}
 body.is-touch .hud-speedo{transform-origin:50% 100%}
+
+/* ---------- menu redesign (Horizon-style) ---------- */
+.screen{background:linear-gradient(100deg,rgba(4,8,15,.94) 0%,rgba(4,8,15,.7) 38%,rgba(4,8,15,0) 72%),linear-gradient(0deg,rgba(4,8,15,.7),transparent 30%)}
+.screen.full{background:radial-gradient(ellipse at 20% 0%,rgba(30,50,80,.55),transparent 60%),rgba(4,8,15,.93)}
+.brand{position:relative;display:inline-block;padding-bottom:10px}
+.brand::after{content:"";position:absolute;left:0;bottom:0;height:5px;width:62%;background:linear-gradient(90deg,var(--acc),transparent);transform:skewX(-30deg)}
+.menu .btn{opacity:0;animation:rise .45s cubic-bezier(.2,.8,.2,1) forwards}
+.menu .btn:nth-child(1){animation-delay:.05s}.menu .btn:nth-child(2){animation-delay:.1s}.menu .btn:nth-child(3){animation-delay:.15s}.menu .btn:nth-child(4){animation-delay:.2s}.menu .btn:nth-child(5){animation-delay:.25s}.menu .btn:nth-child(6){animation-delay:.3s}.menu .btn:nth-child(7){animation-delay:.35s}
+@keyframes rise{from{opacity:0;transform:translateX(-28px)}to{opacity:1;transform:none}}
+.btn{position:relative;border-left:4px solid var(--acc);background:linear-gradient(90deg,rgba(14,22,38,.82),rgba(14,22,38,.55))}
+.btn.ghost{border-left-color:var(--line);background:transparent}
+.btn:hover,.btn:focus-visible,.btn.sel{box-shadow:0 8px 30px rgba(255,140,30,.35)}
+.btn:disabled{filter:grayscale(1)}
+.step{display:inline-flex;align-items:center;gap:10px}
+.step::before{content:"";width:28px;height:3px;background:var(--acc2);transform:skewX(-30deg)}
+.card h3{text-transform:uppercase;letter-spacing:.02em}
+.card.sel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--acc)}
+.panel{border-top:3px solid var(--acc)}
+table.t tr:nth-child(even) td{background:rgba(255,255,255,.03)}
+
+/* career */
+.chip{display:flex;align-items:center;gap:12px;margin:0 0 10px;max-width:340px;background:var(--glass);border:1px solid var(--line);border-left:4px solid var(--acc2);padding:8px 14px 8px 8px;clip-path:polygon(0 0,100% 0,calc(100% - 12px) 100%,0 100%)}
+.chip .lv{width:46px;height:46px;display:grid;place-items:center;font-size:26px;font-weight:900;font-style:italic;background:linear-gradient(135deg,var(--acc),#ff7a1a);color:#111;transform:skewX(-8deg)}
+.chip-body{flex:1}.chip-top{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);letter-spacing:.1em}.chip-top b{color:var(--acc);font-size:14px}
+.chip .bar{margin:6px 0 0}
+.career{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:28px;max-height:62vh}
+.achs{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;align-content:start}
+.ach{display:flex;gap:12px;align-items:center;padding:10px 14px;background:var(--glass);border:1px solid var(--line);opacity:.5}
+.ach.on{opacity:1;border-color:var(--acc)}.ach i{font-size:26px;color:var(--acc);font-style:normal}
+.ach b{display:block}.ach span{font-size:12px;color:var(--dim)}
+.medal{font-weight:700;font-size:13px}.medal.m1{color:#d99560}.medal.m2{color:#cfd8e3}.medal.m3{color:#ffd23c}
+.rewards{display:flex;flex-wrap:wrap;gap:8px 22px;align-items:center;margin:10px 0}
+.rw{display:flex;flex-direction:column;font-size:12px;color:var(--dim);letter-spacing:.1em}.rw b{font-size:22px;color:#fff;font-style:italic}
+.medalbig{font-size:26px;font-weight:900;font-style:italic;padding:4px 18px;border:2px solid currentColor;transform:skewX(-8deg);animation:pop .6s cubic-bezier(.2,1.6,.4,1)}
+.medalbig.m1{color:#d99560}.medalbig.m2{color:#cfd8e3}.medalbig.m3{color:#ffd23c}.medalbig small{font-size:12px;color:var(--acc2)}
+.levelup{flex-basis:100%;font-weight:900;font-style:italic;font-size:20px;color:#7dff9b;animation:pop .6s}
+@keyframes pop{from{opacity:0;transform:scale(1.6) skewX(-8deg)}}
+@media (max-width:760px),(max-height:520px){.career{grid-template-columns:1fr;max-height:50vh}}

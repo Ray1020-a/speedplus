@@ -484,12 +484,14 @@ export class Game {
     if (this.state === 'finished') return;
     this.state = 'finished';
     this.finishMs = elapsed;
+    this.endDrift(true);
     const L = this.track.length;
     const bestLap = this.lapTimes.length ? Math.min(...this.lapTimes) : null;
     const partial = this.track.closed ? clamp(this.rel / L, 0, 0.999) : clamp(this.rel / (this.track.sFinish || 1), 0, 0.999);
     const laps = this.lapsDone;
     const result = {
       mode: this.mode, ms: elapsed, laps, score: this.mode === 'lap' ? laps + partial : elapsed, bestLap,
+      drift: this.drift.total, driftBest: this.drift.best, hits: this.hits || 0,
     };
     this.audio?.beep(1200, 0.5, 0.3);
     this.hud.msg('FINISH', 'go', 2500);
@@ -726,12 +728,19 @@ export class Game {
     for (const e of v.events.splice(0)) {
       if (e.type === 'hit') {
         a?.hit(e.power);
+        this.hits = (this.hits || 0) + 1;
         if (e.power > 0.15 && this.drift.pts > 0) this.endDrift(false);
         this.shake = Math.max(this.shake, e.power * 8);
         this.input.rumble(0.3 + e.power * 0.7, 0.4 + e.power * 0.6, 120 + e.power * 200);
         this.input.buzz(40 + e.power * 120);
       } else if (e.type === 'shift') a?.shift();
     }
+    // turbo flutter / exhaust crackle when lifting off at high revs
+    if (this._thr > 0.8 && inp.throttle < 0.1 && v.rpm > v.redline * 0.6 && v.speedKmh > 40) {
+      a?.burst?.(900, 0.1, 0.16, 'bandpass');
+      setTimeout(() => a?.burst?.(1400, 0.05, 0.1, 'bandpass'), 90);
+    }
+    this._thr = inp.throttle;
     this.shake = Math.max(0, this.shake - dt * 12);
     if (a?.ctx && this.voice) {
       a.updateEngine(this.voice, v.rpm, this.state === 'countdown' ? inp.throttle : inp.throttle, v.limiter, v.shiftTimer > 0);
