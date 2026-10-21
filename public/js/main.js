@@ -10,6 +10,7 @@ import { Room } from './net.js';
 import { makeCharacter } from './characters.js';
 import { buildCar, seatDriver } from './carmodel.js';
 import { downloadModel, parseGLB } from './loader.js';
+import { settings, saveSettings } from './settings.js';
 
 const $ui = document.getElementById('ui');
 const touch = isTouchDevice();
@@ -18,7 +19,11 @@ document.body.classList.toggle('is-touch', touch);
 const quality = localStorage.getItem('sp-quality') && localStorage.getItem('sp-quality') !== 'auto'
   ? localStorage.getItem('sp-quality')
   : touch ? 'low' : 'high';
-const renderer = createRenderer(document.getElementById('gl'), quality);
+let renderer;
+try { renderer = createRenderer(document.getElementById('gl'), quality); } catch (e) {
+  $ui.innerHTML = '<div class="screen full"><h1 class="title">無法啟動 3D 繪圖</h1><p style="color:var(--dim)">你的瀏覽器或裝置不支援 WebGL，請更新瀏覽器或開啟硬體加速。</p></div>';
+  throw e;
+}
 const preview = new Preview(renderer);
 const input = new Input();
 const audio = new GameAudio();
@@ -45,10 +50,25 @@ async function isCached(url) {
   try { return !!(await caches.match(new URL(url, location.href).href)); } catch { return false; }
 }
 
+/** vertical focus movement through the buttons of a menu (title, big choices, pause ...) */
+function moveFocus(dir) {
+  const scope = [...document.querySelectorAll('.screen')].pop();
+  if (!scope) return false;
+  const items = [...scope.querySelectorAll('.menu .btn:not(:disabled), .tab, .row .btn:not(:disabled)')].filter((b) => b.offsetParent);
+  if (!items.length) return false;
+  const i = items.indexOf(document.activeElement);
+  items[(i + dir + items.length) % items.length].focus();
+  audio.tick?.();
+  return true;
+}
 function keyNav(handlers) {
   const fn = (e) => {
     if (e.target.matches('input,textarea,select')) { if (e.key === 'Enter' && handlers.Enter) handlers.Enter(e); return; }
-    const k = handlers[e.key];
+    let k = handlers[e.key];
+    // synthetic Enter (gamepad A) does not activate a focused button by itself
+    if (!k && e.key === 'Enter' && !e.isTrusted) k = () => document.activeElement?.click?.();
+    if (!k && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) k = () => moveFocus(e.key === 'ArrowDown' ? 1 : -1);
+    if (!k && (e.key === 'ArrowRight' || e.key === 'ArrowLeft') && document.activeElement?.closest('.row,.tabs')) k = () => moveFocus(e.key === 'ArrowRight' ? 1 : -1);
     if (k) { e.preventDefault(); k(e); }
   };
   addEventListener('keydown', fn);
@@ -61,6 +81,31 @@ function screen(el, handlers) {
   show(el);
   el.querySelector('[autofocus]')?.focus();
 }
+
+/* Gamepad drives the menus too: D-pad / left stick = arrows, A = confirm, B = back, Start = pause */
+const padNext = {};
+function padMenuTick() {
+  requestAnimationFrame(padMenuTick);
+  const gp = input.pad != null ? navigator.getGamepads()[input.pad] : null;
+  if (!gp || (game && !game.paused)) return;
+  const b = gp.buttons;
+  const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
+  const now = {
+    ArrowUp: b[12]?.pressed || ay < -0.6, ArrowDown: b[13]?.pressed || ay > 0.6,
+    ArrowLeft: b[14]?.pressed || ax < -0.6, ArrowRight: b[15]?.pressed || ax > 0.6,
+    Enter: b[0]?.pressed, Escape: b[1]?.pressed,
+  };
+  const t = performance.now();
+  for (const k in now) {
+    if (!now[k]) { delete padNext[k]; continue; }
+    const first = !(k in padNext);
+    if (!first && (t < padNext[k] || !k.startsWith('Arrow'))) continue;
+    padNext[k] = t + (first ? 380 : 120);
+    dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+  }
+}
+requestAnimationFrame(padMenuTick);
+document.addEventListener('click', (e) => { if (e.target.closest?.('.btn,.tab,.card')) audio.tick?.(); });
 
 /* ---------------------------------------------------------------- boot */
 async function boot() {
@@ -150,7 +195,7 @@ function title() {
   el.querySelector('#start').onclick = async () => { await audio.init(); if (touch) document.documentElement.requestFullscreen?.().catch(() => {}); if (S.joinCode) S.multi = true; pickChar(); };
   el.querySelector('#rank').onclick = rankScreen;
   el.querySelector('#keys').onclick = () => keysScreen(title);
-  el.querySelector('#set').onclick = settingsScreen;
+  el.querySelector('#set').onclick = () => settingsScreen();
   input.onPad = (on, id) => { const p = el.querySelector('#padinfo'); if (p) p.textContent = on ? `🎮 已連接：${id}` : ''; };
   screen(el, {});
   showCharPreview(S.char);
@@ -351,8 +396,16 @@ function lobby() {
 }
 
 /* ---------------------------------------------------------------- race start */
+const TIPS = [
+  '提示：按住空白鍵不放可以甩尾，維持漂移角度累積漂移分數。',
+  '提示：入彎前先放油門再煞車，出彎時再慢慢補油。',
+  '提示：按 R 可以隨時回到賽道，按 C 切換四種視角。',
+  '提示：滑鼠左鍵拖曳可以環顧四周，放開後會自動回正。',
+  '提示：手把支援震動回饋，碰撞、紅線與打滑都能感覺到。',
+  '提示：在設定裡可以調整 FOV、HUD 大小與速度單位。',
+];
 function loadingScreen(text) {
-  const el = h(`<div class="screen full"><div class="loadbox"><div class="brand" style="font-size:56px">SPEED<b>+</b></div><h2 id="t" style="font-style:italic">${text}</h2><div id="bars"></div><div style="color:var(--dim);font-size:13px">模型會儲存在本機，下次無須重新下載</div></div></div>`);
+  const el = h(`<div class="screen full"><div class="loadbox"><div class="brand" style="font-size:56px">SPEED<b>+</b></div><h2 id="t" style="font-style:italic">${text}</h2><div id="bars"></div><div style="color:var(--dim);font-size:13px">模型會儲存在本機，下次無須重新下載</div><div class="tip" style="margin-top:22px">${TIPS[Math.floor(Math.random() * TIPS.length)]}</div></div></div>`);
   screen(el, {});
   const bars = el.querySelector('#bars');
   const rows = {};
@@ -442,28 +495,48 @@ async function startMulti(m) {
 /* ---------------------------------------------------------------- pause / finish */
 function togglePause() {
   if (!game || game.state === 'loading') return;
-  if (game.pauseEl) { game.pauseEl.remove(); game.pauseEl = null; game.paused = false; return; }
+  if (game.pauseEl && !game.pauseEl.isConnected) return; // a sub-screen (settings / keys) is open
+  if (game.pauseEl) { closePause(); return; }
   game.paused = true;
+  audio.pause(game.mode !== 'multi');
   const multi = game.mode === 'multi';
-  const el = h(`<div class="screen full" style="align-items:center;justify-content:center"><div class="menu" style="margin:0">
-    <h1 class="title">暫停${multi ? ' (比賽持續進行)' : ''}</h1>
+  const el = h(`<div class="screen full pause" style="align-items:center;justify-content:center"><div class="menu" style="margin:0">
+    <div class="step" style="text-align:center">PAUSED</div>
+    <h1 class="title" style="text-align:center;margin-bottom:10px">暫停${multi ? ' <small style="font-size:14px;color:var(--dim)">(比賽持續進行)</small>' : ''}</h1>
     <button class="btn" id="r" autofocus>繼續</button>
     ${multi ? '' : '<button class="btn" id="re">重新開始</button>'}
     <button class="btn" id="rs">復位到賽道 (R)</button>
+    <button class="btn" id="cr">重置視角</button>
+    <button class="btn" id="st">設定</button>
     <button class="btn" id="k">遊戲鍵位說明</button>
     <button class="btn" id="q">離開比賽</button></div></div>`);
   game.pauseEl = el;
+  game.pauseOff = keyNav({ Escape: (e) => { if (!e.isTrusted) togglePause(); } });
   el.querySelector('#r').onclick = togglePause;
   el.querySelector('#re')?.addEventListener('click', () => { togglePause(); game.restart(); });
   el.querySelector('#rs').onclick = () => { togglePause(); game.resetToTrack(); };
+  el.querySelector('#cr').onclick = () => { game.look.yaw = game.look.pitch = 0; closePause(); };
+  el.querySelector('#st').onclick = () => { el.remove(); settingsScreen(() => document.body.append(el), document.body); };
   el.querySelector('#k').onclick = () => { el.remove(); keysScreen(() => { document.body.append(el); }, document.body); };
   el.querySelector('#q').onclick = quitToMenu;
   document.body.append(el);
   el.style.position = 'fixed';
   el.style.zIndex = 20;
+  el.querySelector('#r').focus();
+}
+function closePause() {
+  if (!game?.pauseEl) return;
+  game.pauseEl.remove();
+  game.pauseEl = null;
+  game.pauseOff?.();
+  game.pauseOff = null;
+  game.paused = false;
+  audio.pause(false);
 }
 
 function quitToMenu() {
+  game?.pauseOff?.();
+  audio.pause(false);
   game?.pauseEl?.remove();
   game?.dispose();
   game = null;
@@ -500,6 +573,7 @@ async function finished(res) {
       rows.slice(0, 10).map((r, i) => `<tr class="${hl && r.created === hl ? 'me' : ''}"><td>${i + 1}</td><td>${esc(r.player)}</td><td>${esc(carName(r.car_id))}</td><td>${recMode === 'time' ? fmtTime(r.score) : r.score.toFixed(2)}</td></tr>`).join('');
   };
   el.querySelector('#again').onclick = () => { el.remove(); hudEl.classList.remove('hidden'); game.paused = false; game.restart(); };
+  el.querySelector('#again').focus();
   el.querySelector('#menu').onclick = () => { el.remove(); quitToMenu(); };
   document.body.append(el);
   el.style.cssText += ';position:fixed;z-index:20;overflow:auto';
@@ -559,17 +633,36 @@ function keysScreen(back, parent) {
   else screen(el, { Escape: close });
 }
 
-function settingsScreen() {
+function settingsScreen(back = title, parent) {
   const q = localStorage.getItem('sp-quality') || 'auto';
-  const el = h(`<div class="screen"><div class="step">SETTINGS</div><h1 class="title">設定</h1>
-    <div class="panel">
+  const sw = (id, label, on) => `<div class="field sw"><label for="${id}">${label}</label><button class="toggle ${on ? 'on' : ''}" id="${id}" role="switch" aria-checked="${!!on}"><i></i></button></div>`;
+  const el = h(`<div class="screen${parent ? ' full' : ''}" style="${parent ? 'position:fixed;z-index:30;overflow:auto' : ''}"><div class="step">SETTINGS</div><h1 class="title">設定</h1>
+    <div class="panel scroll" style="max-width:640px;width:min(640px,92vw)">
       <div class="field"><label>音量</label><input type="range" id="vol" min="0" max="1" step="0.05" value="${audio.volume}"></div>
+      <div class="field"><label>速度單位</label><div class="tabs" id="units" style="margin:0">${[['kmh', 'km/h'], ['mph', 'mph']].map(([v, t]) => `<button class="tab ${settings.units === v ? 'on' : ''}" data-v="${v}">${t}</button>`).join('')}</div></div>
+      <div class="field"><label>視野角 FOV <b id="fovv" style="color:#fff">${settings.fov}°</b></label><input type="range" id="fov" min="50" max="90" step="1" value="${settings.fov}"></div>
+      <div class="field"><label>HUD 大小 <b id="hudv" style="color:#fff">${Math.round(settings.hudScale * 100)}%</b></label><input type="range" id="hud" min="0.7" max="1.3" step="0.05" value="${settings.hudScale}"></div>
+      ${sw('steerAssist', '轉向輔助 (甩尾時自動反打方向盤)', settings.steerAssist)}
+      ${sw('throttleAssist', '鍵盤油門 / 煞車漸進 (更好控制)', settings.throttleAssist)}
+      ${sw('shake', '鏡頭震動', settings.shake)}
+      ${sw('dynRes', '動態解析度 (自動維持流暢幀率)', settings.dynRes)}
       <div class="field"><label>畫質 (變更後重新載入)</label><select id="q">${[['auto', '自動'], ['low', '低 (行動裝置)'], ['medium', '中'], ['high', '高']].map(([v, t]) => `<option value="${v}" ${v === q ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
     </div><div class="spacer"></div><div class="row"><button class="btn" id="b" autofocus>← 返回</button></div></div>`);
   el.querySelector('#vol').oninput = (e) => audio.setVolume(+e.target.value);
+  el.querySelector('#fov').oninput = (e) => { saveSettings({ fov: +e.target.value }); el.querySelector('#fovv').textContent = e.target.value + '°'; };
+  el.querySelector('#hud').oninput = (e) => { saveSettings({ hudScale: +e.target.value }); el.querySelector('#hudv').textContent = Math.round(e.target.value * 100) + '%'; };
+  el.querySelectorAll('#units .tab').forEach((t) => (t.onclick = () => { saveSettings({ units: t.dataset.v }); el.querySelectorAll('#units .tab').forEach((x) => x.classList.toggle('on', x === t)); }));
+  el.querySelectorAll('.toggle').forEach((t) => (t.onclick = () => {
+    const on = !t.classList.contains('on');
+    t.classList.toggle('on', on);
+    t.setAttribute('aria-checked', on);
+    saveSettings({ [t.id]: on });
+  }));
   el.querySelector('#q').onchange = (e) => { localStorage.setItem('sp-quality', e.target.value); location.reload(); };
-  el.querySelector('#b').onclick = title;
-  screen(el, { Escape: title });
+  const close = () => { el.remove(); back(); };
+  el.querySelector('#b').onclick = close;
+  if (parent) { parent.append(el); const off = keyNav({ Escape: () => { off(); close(); } }); el.querySelector('#b').onclick = () => { off(); close(); }; el.querySelector('#b').focus(); }
+  else screen(el, { Escape: close });
 }
 
 async function rankScreen(mapId = S.map?.id, mode = 'time') {

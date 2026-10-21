@@ -46,6 +46,17 @@ export class Vehicle {
     this.longAccel = 0;
     this.latAccel = 0;
     this.events = []; // {type:'hit', power}
+    this.slipAngle = 0;
+    this.drifting = false;
+    // previous physics state, for render interpolation between fixed steps
+    this.pPos = new THREE.Vector3();
+    this.pYaw = 0;
+    this.pPitch = 0;
+    this.pRoll = 0;
+    this.rPos = new THREE.Vector3();
+    this.rYaw = 0;
+    this.rPitch = 0;
+    this.rRoll = 0;
     this._ray = new THREE.Raycaster();
     this._ray.firstHitOnly = true;
   }
@@ -58,6 +69,29 @@ export class Vehicle {
     this.gear = 1;
     this.rpm = this.idle;
     this.pitch = this.roll = 0;
+    this.steerAngle = 0;
+    this.skid = 0;
+    this.drifting = false;
+    this.snap();
+    this.render(1);
+  }
+
+  /** remember the state before a physics step */
+  snap() {
+    this.pPos.copy(this.pos);
+    this.pYaw = this.yaw;
+    this.pPitch = this.pitch;
+    this.pRoll = this.roll;
+  }
+
+  /** blend previous and current state; alpha = fraction of a step not yet simulated */
+  render(alpha) {
+    this.rPos.lerpVectors(this.pPos, this.pos, alpha);
+    let d = this.yaw - this.pYaw;
+    d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;
+    this.rYaw = this.pYaw + d * alpha;
+    this.rPitch = this.pPitch + (this.pitch - this.pPitch) * alpha;
+    this.rRoll = this.pRoll + (this.roll - this.pRoll) * alpha;
   }
 
   get forward() { return new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)); }
@@ -146,7 +180,12 @@ export class Vehicle {
     /* ----- lateral ----- */
     const speedAbs = Math.abs(vf);
     const maxSteer = 0.52 / (1 + (speedAbs / 24) ** 2) + 0.05;
-    const target = input.steer * maxSteer;
+    let target = input.steer * maxSteer;
+    // counter-steer help: when the tail steps out, ease the front wheels toward the direction of travel
+    const slipAng = Math.atan2(vl, Math.max(speedAbs, 3)) * Math.sign(vf || 1);
+    if (input.assist && speedAbs > 8 && !input.handbrake) {
+      target += clamp(slipAng * 0.9, -0.28, 0.28) * (input.steer === 0 ? 1 : 0.6);
+    }
     this.steerAngle += (target - this.steerAngle) * Math.min(1, dt * (input.steer === 0 ? 10 : 8));
     let w = (vf * Math.tan(this.steerAngle)) / this.wheelbase;
     const grip = (2.4 + (speedAbs * speedAbs) * 0.0009) * G * (input.handbrake ? 0.45 : 1); // downforce grows with v^2
@@ -156,9 +195,21 @@ export class Vehicle {
     if (input.handbrake) w *= 1.25;
     this.yawRate += (-w - this.yawRate) * Math.min(1, dt * 16);
     this.yaw += this.yawRate * dt;
+    // the car's momentum stays put in the world while it yaws; tyre grip then drags it back toward the nose
+    const f1 = this.forward;
+    const r1 = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    const wx = fwd.x * vf + right.x * vl, wz = fwd.z * vf + right.z * vl;
+    const sp0 = Math.hypot(vf, vl);
+    vf = wx * f1.x + wz * f1.z;
+    vl = wx * r1.x + wz * r1.z;
     const lateralGrip = input.handbrake ? 1.6 : 9 - 5 * slide;
+    const vl0 = vl;
     vl *= Math.exp(-lateralGrip * dt);
+    // grip redirects speed rather than deleting it; a little is scrubbed off by the sliding tyres
+    if (vf > 0.5) vf = Math.sqrt(Math.max(0, sp0 * sp0 - vl * vl)) * (1 - Math.min(1, Math.abs(vl0) / 8) * 0.35 * dt);
     this.latAccel = vf * -this.yawRate;
+    this.slipAngle = slipAng;
+    this.drifting = speedAbs > 11 && Math.abs(slipAng) > 0.2 && this.airborne === 0;
     this.skid = clamp(Math.abs(vl) / 4 + slide * 0.7 + (input.handbrake ? speedAbs / 30 : 0) + (input.brake > 0.9 && speedAbs > 20 ? 0.4 : 0), 0, 1);
 
     /* ----- integrate (recompute axes after yaw change) ----- */
@@ -173,7 +224,6 @@ export class Vehicle {
 
   collide() {
     if (!this.collider) return;
-    const fwd = this.forward;
     const origin = new THREE.Vector3();
     const dir = new THREE.Vector3();
     const push = new THREE.Vector3();
@@ -208,7 +258,6 @@ export class Vehicle {
       this.pos.add(push);
       this.yawRate *= 0.9;
     }
-    void fwd;
   }
 
   ground(dt) {

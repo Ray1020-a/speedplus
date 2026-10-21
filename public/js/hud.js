@@ -40,6 +40,8 @@ export class Hud {
       <div class="hud-center" id="h-msg"></div>
       <div class="hud-warn" id="h-warn">逆向行駛</div>
       <div class="hud-view" id="h-view"></div>
+      <div class="hud-drift" id="h-drift"><div class="dp" id="h-dp"></div><div class="dm" id="h-dm"></div></div>
+      <div class="hud-total" id="h-total"></div>
       <div class="hud-hold" id="h-hold"><div id="h-hold-t"></div><div class="hb"><i id="h-hold-b"></i></div></div>
       <canvas class="hud-map" id="h-map" width="360" height="360"></canvas>
       <div class="hud-speedo" id="h-speedo"></div>
@@ -74,7 +76,8 @@ export class Hud {
     this.tickGroup = svg('g', { 'font-size': 11, fill: '#cfe9ff', 'text-anchor': 'middle', 'font-family': 'system-ui', 'font-style': 'italic' }, s);
     svg('text', { x: 160, y: 104, 'text-anchor': 'middle', 'font-size': 10, fill: '#6fa6c8', 'font-family': 'system-ui', 'letter-spacing': 2 }, s).textContent = '× 1000 rpm';
     this.setSpeedDigits = makeDigits(s, 3, 88, 112, 1.5);
-    svg('text', { x: 236, y: 176, 'font-size': 16, 'font-style': 'italic', 'font-weight': 700, fill: '#8fe9ff', 'font-family': 'system-ui' }, s).textContent = 'km/h';
+    this.unitText = svg('text', { x: 236, y: 176, 'font-size': 16, 'font-style': 'italic', 'font-weight': 700, fill: '#8fe9ff', 'font-family': 'system-ui' }, s);
+    this.unitText.textContent = 'km/h';
     // gear box
     svg('rect', { x: 128, y: 190, width: 64, height: 46, rx: 6, fill: '#000a', stroke: '#3be7ff88' }, s);
     this.gearText = svg('text', { x: 160, y: 227, 'text-anchor': 'middle', 'font-size': 40, 'font-weight': 800, 'font-style': 'italic', fill: '#fff', 'font-family': 'system-ui' }, s);
@@ -104,6 +107,29 @@ export class Hud {
     this.gearText.textContent = gear === -1 ? 'R' : gear === 0 ? 'N' : gear;
     this.modeText.textContent = mt ? 'MT' : 'AT';
     this.root.querySelector('#h-speedo').classList.toggle('redzone', rpm > this.rpmMax * 0.9);
+  }
+
+  setUnit(u) { if (this.unitText.textContent !== u) this.unitText.textContent = u; }
+
+  /** live drift chain (pts) or a banked flash (bank text); total shows the run's drift score */
+  drift(pts, mult, bank, total) {
+    const el = this.$('h-drift');
+    if (bank != null) {
+      if (!bank) { el.classList.remove('live', 'bank'); return; }
+      this.$('h-dp').textContent = bank;
+      this.$('h-dm').textContent = 'DRIFT BANKED';
+      el.classList.remove('live', 'bank');
+      void el.offsetWidth;
+      el.classList.add('bank');
+      return;
+    }
+    if (pts == null) { el.classList.remove('live'); } else {
+      el.classList.remove('bank');
+      el.classList.add('live');
+      this.$('h-dp').textContent = pts.toLocaleString();
+      this.$('h-dm').textContent = mult > 1 ? `DRIFT  ×${mult}` : 'DRIFT';
+    }
+    if (total != null) { const t = this.$('h-total'); const txt = total > 0 ? `DRIFT SCORE ${total.toLocaleString()}` : ''; if (t.textContent !== txt) t.textContent = txt; }
   }
 
   setMode(text) { this.$('h-mode').textContent = text; }

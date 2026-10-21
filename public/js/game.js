@@ -6,6 +6,7 @@ import { Track } from './track.js';
 import { Vehicle } from './vehicle.js';
 import { createEnvironment, createComposer, buildCollider } from './world.js';
 import { fmtTime } from './api.js';
+import { settings } from './settings.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerpAngle = (a, b, t) => { let d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; return a + d * t; };
@@ -33,6 +34,11 @@ export class Game {
     this.rumbleT = 0;
     this.disposed = false;
     this.look = { yaw: 0, pitch: 0, idle: 0, drag: false };
+    this.camOff = new THREE.Vector3();
+    this.camReady = false;
+    this.drift = { t: 0, pts: 0, total: 0, off: 0, best: 0 };
+    this.res = 1; this.resCeil = 1; this.ft = 0; this.resT = 0;
+    this.t = 0;
   }
 
   /* ------------------------------------------------------------ loading */
@@ -114,6 +120,10 @@ export class Game {
     addEventListener('pointerup', this._pu);
     addEventListener('pointercancel', this._pu);
     addEventListener('resize', (this._rs = () => this.resize()));
+    document.addEventListener('visibilitychange', (this._vis = () => {
+      if (document.hidden && this.mode !== 'multi' && !this.paused && (this.state === 'racing' || this.state === 'countdown')) this.onPause?.();
+    }));
+    this.basePR = this.renderer.getPixelRatio();
     this.resize();
     this.state = 'ready';
   }
@@ -284,6 +294,10 @@ export class Game {
     this.rel = this.prevRel;
     this.wrongWay = 0;
     this.camYaw = yaw;
+    this.camReady = false;
+    v.snap();
+    this.endDrift(false);
+    this.drift.total = 0;
   }
 
   resetToTrack() {
@@ -295,7 +309,10 @@ export class Game {
     v.reset(p.x, v.pos.y, p.z, yaw);
     const gy = v.groundAt(p.x, v.pos.y, p.z, 1.5);
     if (gy != null) v.pos.y = gy;
+    v.snap();
     this.camYaw = yaw;
+    this.camReady = false;
+    this.endDrift(false);
   }
 
   /* ------------------------------------------------------------ run */
@@ -332,7 +349,11 @@ export class Game {
 
   frame() {
     if (this.disposed) return;
-    let dt = Math.min(this.clock.getDelta(), 0.1);
+    const rawDt = this.clock.getDelta();
+    const dt = Math.min(rawDt, 0.1);
+    this.t += dt;
+    this.adaptResolution(rawDt);
+    this.input.speedF = clamp(this.vehicle.speedKmh / (this.vehicle.top * 3.6), 0, 1);
     const inp = this.input.read(dt);
     const ev = inp.ev;
     if (ev.view) { this.view = (this.view + 1) % VIEWS.length; this.hud.setView(VIEWS[this.view]); this.driver.setHeadVisible(this.view !== 3); }
@@ -372,14 +393,17 @@ export class Game {
         const control = this.state === 'finished' ? { throttle: 0, brake: 0.3, steer: 0, handbrake: false } : inp;
         if (this.state === 'finished') control.brake = this.vehicle.speedKmh > 3 ? 0.6 : 0;
         while (this.acc >= STEP && n++ < 6) {
+          this.vehicle.snap();
           this.vehicle.update(STEP, { ...control, shiftUp: n === 1 && inp.shiftUp, shiftDown: n === 1 && inp.shiftDown });
           this.acc -= STEP;
           this.collideRemotes();
         }
         if (n >= 6) this.acc = 0;
         this.updateProgress(now);
+        this.updateDrift(dt);
       }
     }
+    this.vehicle.render(this.state === 'racing' || this.state === 'finished' ? clamp(this.acc / STEP, 0, 1) : 1);
     this.updateRemotes(dt, now);
     this.updateVisuals(dt, inp);
     this.updateEffects(dt, inp);
@@ -439,16 +463,19 @@ export class Game {
     this.sAbs = t.s0;
     this.prevRel = 0;
     this.camYaw = yaw;
-    this.camPos.copy(v.pos);
+    this.camReady = false;
+    v.snap();
   }
 
   lapDone(elapsed, laps) {
     this.lapsDone = laps;
     const lt = elapsed - this.lapStart;
     this.lapStart = elapsed;
+    const prevBest = this.lapTimes.length ? Math.min(...this.lapTimes) : null;
     this.lapTimes.push(lt);
     const best = Math.min(...this.lapTimes);
-    this.hud.msg(lt === best ? `LAP ${laps}  ${fmtTime(lt)}  BEST!` : `LAP ${laps}  ${fmtTime(lt)}`, lt === best ? 'good' : '', 1800);
+    const delta = prevBest != null ? `  ${lt <= prevBest ? '-' : '+'}${(Math.abs(lt - prevBest) / 1000).toFixed(3)}` : '';
+    this.hud.msg(lt === best ? `LAP ${laps}  ${fmtTime(lt)}${delta}  BEST!` : `LAP ${laps}  ${fmtTime(lt)}${delta}`, lt === best ? 'good' : '', 2200);
     this.audio?.beep(880, 0.2);
     if (this.mode !== 'lap' && laps >= this.totalLaps) this.finishRace(elapsed);
   }
@@ -583,10 +610,12 @@ export class Game {
   updateVisuals(dt, inp) {
     const v = this.vehicle;
     const g = this.carGroup.root;
-    g.position.copy(v.pos);
-    const bodyRoll = clamp(-v.latAccel * 0.0035, -0.06, 0.06);
-    const bodyPitch = clamp(-v.longAccel * 0.0025, -0.04, 0.04);
-    g.rotation.set(v.pitch + bodyPitch, v.yaw, v.roll + bodyRoll);
+    g.position.copy(v.rPos);
+    // body motion eases toward its target so weight transfer feels soft instead of twitchy
+    const kb = 1 - Math.exp(-dt * 9);
+    this.bodyRoll = (this.bodyRoll || 0) + (clamp(-v.latAccel * 0.0035, -0.06, 0.06) - (this.bodyRoll || 0)) * kb;
+    this.bodyPitch = (this.bodyPitch || 0) + (clamp(-v.longAccel * 0.0025, -0.04, 0.04) - (this.bodyPitch || 0)) * kb;
+    g.rotation.set(v.rPitch + this.bodyPitch, v.rYaw, v.rRoll + this.bodyRoll);
 
     // steering arms follow input a little
     this.driver.group.rotation.z = (this.carCfg.seat.rot[2] * Math.PI) / 180 + inp.steer * 0.05;
@@ -600,38 +629,96 @@ export class Game {
     const L = this.look;
     if (!L.drag) { L.idle += dt; if (L.idle > 1.5) { const k = Math.exp(-dt * 3); L.yaw *= k; L.pitch *= k; } }
     const S = this.S;
+    const pos = v.rPos;
     const speedF = clamp(v.speedKmh / (v.top * 3.6), 0, 1);
-    let fov = 62 + speedF * 22;
+    const sk = Math.max(S, 0.1) * 4;
+    // smooth shake (no per-frame random): hits + a faint speed buzz
+    const amp = settings.shake ? (this.shake * 0.012 + speedF ** 3 * 0.003) * sk : 0;
+    const t = this.t;
+    const nx = (Math.sin(t * 61.3) + 0.7 * Math.sin(t * 37.1 + 1)) * amp;
+    const ny = (Math.sin(t * 53.7 + 2) + 0.7 * Math.sin(t * 29.3)) * amp;
+    let fov = settings.fov + speedF * 20 + clamp(-v.longAccel * 0.12, -2, 3);
     if (this.view <= 1) {
-      this.camYaw = lerpAngle(this.camYaw, v.yaw, Math.min(1, dt * (v.speedKmh > 5 ? 5 : 2)));
-      const dist = (this.view === 0 ? 6.0 : 10.5) * S + speedF * -0.3 * S * 4;
+      // follow the car's heading, but lean toward the direction of travel while sliding (Horizon-style drift cam)
+      const moving = v.speedKmh > 8;
+      const travel = moving ? Math.atan2(-v.vel.x, -v.vel.z) : v.rYaw;
+      const slideW = moving && v.signedKmh > 0 ? clamp(Math.abs(v.slipAngle) * 1.4, 0, 0.55) : 0;
+      const goal = lerpAngle(v.rYaw, travel, slideW);
+      this.camYaw = lerpAngle(this.camYaw, goal, 1 - Math.exp(-dt * (moving ? 6 : 2.5)));
+      const dist = (this.view === 0 ? 6.0 : 10.5) * S * (1 + speedF * 0.1);
       const height = (this.view === 0 ? 2.0 : 3.6) * S;
-      const target = new THREE.Vector3(v.pos.x, v.pos.y + 0.7 * S, v.pos.z);
+      const target = new THREE.Vector3(pos.x, pos.y + 0.7 * S, pos.z);
       const yawC = this.camYaw + L.yaw;
       const dir = new THREE.Vector3(Math.sin(yawC), 0, Math.cos(yawC)); // behind the car
-      const want = target.clone().addScaledVector(dir, dist * Math.cos(L.pitch));
+      const want = new THREE.Vector3().addScaledVector(dir, dist * Math.cos(L.pitch));
       want.y += height + dist * Math.sin(L.pitch);
       // keep the camera inside the map
-      const to = want.clone().sub(target);
-      const len = to.length();
-      const hit = v.cast(target, to.normalize(), len + 0.1);
-      if (hit < len + 0.1) want.copy(target).addScaledVector(to, Math.max(0.15, hit - 0.12));
-      this.camPos.lerp(want, Math.min(1, dt * 14));
-      if (this.camPos.distanceTo(want) > 3) this.camPos.copy(want);
-      cam.position.copy(this.camPos);
-      cam.position.y += (Math.random() - 0.5) * this.shake * 0.02;
+      const len = want.length();
+      const hit = v.cast(target, want.clone().normalize(), len + 0.1);
+      if (hit < len + 0.1) want.setLength(Math.max(0.15, hit - 0.12));
+      // only the offset is smoothed, so the car never trails out of frame at speed
+      if (!this.camReady) { this.camOff.copy(want); this.camReady = true; }
+      else this.camOff.lerp(want, 1 - Math.exp(-dt * (hit < len ? 30 : 10)));
+      cam.position.copy(target).add(this.camOff);
+      cam.position.x += nx; cam.position.y += ny;
       cam.lookAt(target.x, target.y + 0.2 * S, target.z);
+      cam.rotateZ(clamp(-v.yawRate * 0.012 * speedF, -0.04, 0.04));
     } else {
       const off = new THREE.Vector3().fromArray(this.view === 2 ? this.carCfg.hood : this.carCfg.cockpitEye).multiplyScalar(S);
-      off.applyEuler(this.carGroup.root.rotation);
-      cam.position.copy(v.pos).add(off);
-      const e = this.carGroup.root.rotation;
-      cam.rotation.set(e.x + (this.view === 3 ? 0 : -0.03) - L.pitch * 0.6, e.y + L.yaw * 0.8, e.z, 'YXZ');
-      cam.position.x += (Math.random() - 0.5) * this.shake * 0.01;
+      const root = this.carGroup.root;
+      off.applyEuler(root.rotation);
+      cam.position.copy(pos).add(off);
+      const e = root.rotation;
+      cam.rotation.set(e.x + (this.view === 3 ? 0 : -0.03) - L.pitch * 0.6 + ny * 0.4, e.y + L.yaw * 0.8 - v.steerAngle * 0.25 + nx * 0.4, e.z, 'YXZ');
+      cam.position.x += nx * 0.5; cam.position.y += ny * 0.5;
       fov += this.view === 3 ? 12 : 4;
+      this.camReady = false;
     }
-    cam.fov += (fov - cam.fov) * Math.min(1, dt * 4);
+    cam.fov += (fov - cam.fov) * (1 - Math.exp(-dt * 5));
     cam.updateProjectionMatrix();
+  }
+
+  /** Lowers / raises the render resolution to hold the frame rate. */
+  adaptResolution(rawDt) {
+    if (!settings.dynRes || !this.composer || this.state === 'loading') return;
+    this.ft = this.ft ? this.ft * 0.96 + rawDt * 0.04 : rawDt;
+    const now = performance.now();
+    if (now - this.resT < 1500 || rawDt > 0.25) return;
+    let next = this.res;
+    if (this.ft > 0.026 && this.res > 0.55) { next = this.res - 0.15; this.resCeil = Math.max(0.55, this.res - 0.05); }
+    else if (this.ft < 0.0175 && this.res < this.resCeil) next = Math.min(this.resCeil, this.res + 0.1);
+    this.resT = now;
+    if (next === this.res) return;
+    this.res = next;
+    this.renderer.setPixelRatio(this.basePR * next);
+    this.composer.setPixelRatio?.(this.basePR * next);
+    this.resize();
+  }
+
+  /* ------------------------------------------------------------ drift scoring */
+  updateDrift(dt) {
+    const v = this.vehicle, d = this.drift;
+    if (this.state !== 'racing') return;
+    if (v.drifting) {
+      d.t += dt; d.off = 0;
+      const mult = 1 + Math.min(4, Math.floor(d.t / 2));
+      d.pts += dt * v.speedKmh * 0.9 * (0.6 + Math.min(1, Math.abs(v.slipAngle))) * mult;
+      d.mult = mult;
+    } else if (d.pts > 0) {
+      d.off += dt;
+      if (d.off > 0.9) this.endDrift(true);
+    }
+  }
+  endDrift(bank) {
+    const d = this.drift;
+    if (bank && d.pts >= 50) {
+      const pts = Math.round(d.pts);
+      d.total += pts;
+      d.best = Math.max(d.best, pts);
+      this.hud.drift(null, 0, `+${pts.toLocaleString()}`);
+      this.audio?.beep(1320, 0.12, 0.12);
+    } else if (!bank && d.pts > 0) this.hud.drift(null, 0, '');
+    d.t = 0; d.pts = 0; d.off = 0; d.mult = 1;
   }
 
   updateEffects(dt, inp) {
@@ -639,6 +726,7 @@ export class Game {
     for (const e of v.events.splice(0)) {
       if (e.type === 'hit') {
         a?.hit(e.power);
+        if (e.power > 0.15 && this.drift.pts > 0) this.endDrift(false);
         this.shake = Math.max(this.shake, e.power * 8);
         this.input.rumble(0.3 + e.power * 0.7, 0.4 + e.power * 0.6, 120 + e.power * 200);
         this.input.buzz(40 + e.power * 120);
@@ -667,7 +755,11 @@ export class Game {
 
   updateHud(now) {
     const v = this.vehicle, hud = this.hud;
-    hud.setDash(v.speedKmh, v.rpm, v.gear, this.mt);
+    const mph = settings.units === 'mph';
+    hud.setUnit(mph ? 'mph' : 'km/h');
+    hud.setDash(v.speedKmh * (mph ? 0.621371 : 1), v.rpm, v.gear, this.mt);
+    const dr = this.drift;
+    hud.drift(dr.pts > 0 && (v.drifting || dr.off < 0.9) ? Math.round(dr.pts) : null, dr.mult || 1, null, dr.total);
     const elapsed = this.state === 'countdown' ? 0 : this.state === 'finished' ? this.finishMs : now - this.raceStart;
     if (this.mode === 'lap') {
       hud.setTime(0, fmtTime(Math.max(0, LAP_MODE_MS - elapsed)));
@@ -704,6 +796,7 @@ export class Game {
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
     removeEventListener('resize', this._rs);
+    document.removeEventListener('visibilitychange', this._vis);
     this.renderer.domElement.removeEventListener('pointerdown', this._pd);
     removeEventListener('pointermove', this._pm);
     removeEventListener('pointerup', this._pu);

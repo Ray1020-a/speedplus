@@ -223,6 +223,10 @@ export class GameAudio {
     o.start(t);
     o.stop(t + 0.35);
   }
+  /** soft UI click */
+  tick() { if (this.ctx && this.ctx.state === 'running') this.beep(1180, 0.05, 0.07); }
+  /** mute engine/wind while the game is paused */
+  pause(on) { if (this.ctx) this.master.gain.setTargetAtTime(on ? this.volume * 0.12 : this.muted ? 0 : this.volume, this.ctx.currentTime, 0.05); }
   shift() { if (this.ctx) this.burst(2500, 0.07, 0.25, 'bandpass'); }
   beep(freq, dur = 0.18, gain = 0.25) {
     if (!this.ctx) return;

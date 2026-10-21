@@ -1,3 +1,4 @@
+import { settings } from './settings.js';
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 export const isTouchDevice = () =>
@@ -19,6 +20,9 @@ export class Input {
     this.touch = { left: false, right: false, gas: false, brake: false, hand: false, hold: false };
     this.edge = { up: false, down: false, view: false, reset: false, pause: false, mute: false };
     this.steer = 0; // smoothed keyboard steering
+    this.thr = 0; // smoothed keyboard throttle / brake
+    this.brk = 0;
+    this.speedF = 0; // 0..1, set by the game each frame (keyboard steering gets calmer at speed)
     this.pad = null;
     this.usingPad = false;
     this.enabled = true;
@@ -58,9 +62,15 @@ export class Input {
     if (this.touch.brake) brake = 1;
     target += (this.touch.right ? 1 : 0) - (this.touch.left ? 1 : 0);
     if (this.touch.hand) hand = true;
-    // keyboard / touch steering eases in and returns to centre
-    const rate = target === 0 ? 6 : 4.5;
+    // keyboard / touch steering eases in, is gentler at speed, and snaps back faster when reversing direction
+    const flip = target !== 0 && Math.sign(target) !== Math.sign(this.steer) && this.steer !== 0;
+    const rate = target === 0 ? 7 + 4 * this.speedF : (5.4 - 2.6 * this.speedF) * (flip ? 1.8 : 1);
     this.steer += clamp(target - this.steer, -rate * dt, rate * dt);
+    if (settings.throttleAssist) {
+      this.thr += clamp(throttle - this.thr, -9 * dt, 6 * dt);
+      this.brk += clamp(brake - this.brk, -12 * dt, 8 * dt);
+      throttle = this.thr; brake = this.brk;
+    }
     let steer = this.steer;
 
     // gamepad
@@ -69,15 +79,15 @@ export class Input {
       const prev = this.padPrev;
       const b = (i) => gp.buttons[i]?.pressed;
       const edge = (i) => b(i) && !prev[i];
-      let sx = gp.axes[0] || 0;
-      if (Math.abs(sx) < 0.08) sx = 0;
-      sx = Math.sign(sx) * Math.pow(Math.abs(sx), 1.3);
+      const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
+      let sx = Math.hypot(ax, ay) < 0.1 ? 0 : ax; // radial dead zone
+      sx = Math.sign(sx) * Math.pow(Math.abs(sx), 1.5) * (1 - 0.25 * this.speedF); // finer centre, calmer at speed
       if (b(14)) sx = -1;
       if (b(15)) sx = 1;
       const rt = gp.buttons[7]?.value || 0, lt = gp.buttons[6]?.value || 0;
       if (Math.abs(sx) > 0 || rt > 0.05 || lt > 0.05 || b(0)) this.usingPad = true;
       if (this.usingPad) {
-        steer = sx || steer;
+        steer = sx;
         throttle = Math.max(throttle, rt);
         brake = Math.max(brake, lt);
         hand = hand || b(0);
@@ -90,7 +100,7 @@ export class Input {
       this.padPrev = gp.buttons.map((x) => x.pressed);
     }
 
-    const out = { throttle, brake, steer: clamp(steer, -1, 1), handbrake: hand, shiftUp: this.edge.up, shiftDown: this.edge.down };
+    const out = { throttle, brake, steer: clamp(steer, -1, 1), handbrake: hand, assist: settings.steerAssist, shiftUp: this.edge.up, shiftDown: this.edge.down };
     const ev = { ...this.edge };
     this.edge = { up: false, down: false, view: false, reset: false, pause: false, mute: false };
     return { ...out, ev };

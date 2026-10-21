@@ -117,3 +117,34 @@ body.is-touch .hud-map{width:min(130px,17vw);height:min(130px,17vw);bottom:auto;
 .hud-hold.nobar .hb{display:none}
 .started .tb.start{display:none}
 .tb.start{left:50%;transform:translateX(-50%);top:46%;width:min(26vh,120px);height:min(26vh,120px);font-size:16px;text-align:center}
+
+/* ---------- drift chain ---------- */
+.hud-drift{position:absolute;left:50%;top:21%;transform:translateX(-50%);text-align:center;opacity:0;font-style:italic;font-weight:900;text-shadow:0 3px 16px #000}
+.hud-drift .dp{font-size:54px;line-height:1;font-variant-numeric:tabular-nums;color:#fff}
+.hud-drift .dm{font-size:14px;letter-spacing:.35em;color:var(--acc2)}
+.hud-drift.live{opacity:1}
+.hud-drift.bank{animation:bank 1.8s ease forwards}
+.hud-drift.bank .dp{color:#7dff9b}
+@keyframes bank{0%{opacity:1;transform:translateX(-50%) scale(1.25)}15%{transform:translateX(-50%) scale(1)}75%{opacity:1}100%{opacity:0;transform:translateX(-50%) translateY(-26px)}}
+.hud-total{position:absolute;left:max(18px,env(safe-area-inset-left));top:calc(max(14px,env(safe-area-inset-top)) + 118px);font-size:12px;letter-spacing:.2em;font-weight:700;color:var(--acc2);font-style:italic}
+
+/* ---------- polish ---------- */
+:root{--hud-scale:1}
+#hud .hud-tl,#hud .hud-tr{zoom:var(--hud-scale)}
+.hud-speedo{transform-origin:100% 100%;scale:var(--hud-scale)}
+.hud-map{transform-origin:0 100%;scale:var(--hud-scale)}
+.btn:focus-visible,.tab:focus-visible,.card:focus-visible{outline:2px solid var(--acc2);outline-offset:3px}
+.pause{background:rgba(5,9,16,.72)!important;backdrop-filter:blur(14px);animation:fade .2s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.tip{color:var(--acc2);font-size:14px;font-style:italic;min-height:2.6em}
+.field.sw{flex-direction:row;align-items:center;justify-content:space-between;gap:16px}
+.toggle{flex:0 0 52px;width:52px;height:28px;border-radius:14px;border:1px solid var(--line);background:#0008;position:relative;transition:.2s;padding:0}
+.toggle i{position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s}
+.toggle.on{background:var(--acc);border-color:var(--acc)}
+.toggle.on i{left:27px;background:#111}
+input[type=range]{width:100%;accent-color:var(--acc);height:28px}
+.card{will-change:transform}
+.card.sel{transform:translateY(-6px) scale(1.03)}
+.btn:active{transform:translateX(6px) scale(.98)}
+@media (prefers-reduced-motion:reduce){.screen,.pause{animation:none}.btn,.card{transition:none}}
+body.is-touch .hud-speedo{transform-origin:50% 100%}
