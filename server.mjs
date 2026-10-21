@@ -45,6 +45,8 @@ const defaultMap = (name) => ({
   track: { width: 3, points: [] },
   spawnY: null,
   sky: 'day',
+  light: 1,            // sun / ambient light intensity multiplier
+  brightness: 1,       // overall exposure multiplier
 });
 const defaultCharacter = (name, c) => ({ name, type: 'procedural', ...c });
 

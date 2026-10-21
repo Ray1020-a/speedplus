@@ -120,14 +120,16 @@ renderer.setAnimationLoop(() => {
   if (mapMode) mv.draw();
 });
 
+let hemiLight, sunLight;
 function newScene(bg = 0x1b2230) {
   scene.traverse((o) => { o.geometry?.dispose?.(); });
   scene = new THREE.Scene();
   scene.background = new THREE.Color(bg);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x445066, 1.6));
-  const sun = new THREE.DirectionalLight(0xffffff, 2.2);
-  sun.position.set(5, 10, 6);
-  scene.add(sun);
+  hemiLight = new THREE.HemisphereLight(0xffffff, 0x445066, 1.6);
+  sunLight = new THREE.DirectionalLight(0xffffff, 2.2);
+  sunLight.position.set(5, 10, 6);
+  scene.add(hemiLight, sunLight);
+  renderer.toneMappingExposure = 1;
   tc.detach();
   scene.add(tc.getHelper());
   onFrame = null;
@@ -467,6 +469,13 @@ function mapPointer() {
   };
 }
 
+function applyLight() {
+  const c = cur.cfg;
+  sunLight.intensity = 2.2 * (c.light ?? 1);
+  hemiLight.intensity = 1.6 * (c.light ?? 1);
+  renderer.toneMappingExposure = c.brightness ?? 1;
+}
+
 function applyMapVisibility() {
   const c = cur.cfg;
   const hide = c.hide ? new RegExp(c.hide, 'i') : null;
@@ -523,6 +532,10 @@ function mapPanel(box) {
     hint(`地圖範圍 (m)：${(box.max.x - box.min.x).toFixed(1)} × ${(box.max.z - box.min.z).toFixed(1)}，高 ${(box.max.y - box.min.y).toFixed(1)}。起點旁的方框為依比例縮小後的賽車。`),
     num('速度上限 km/h', () => c.maxSpeed ?? 160, (v) => (c.maxSpeed = v), { min: 30, max: 400, step: 5 }),
     num('賽車縮放', () => c.carScale, (v) => (c.carScale = v), { min: 0.02, max: 2, step: 0.01 }, true),
+    h3('光照'),
+    num('光源照射度', () => c.light ?? 1, (v) => { c.light = v; applyLight(); }, { min: 0, max: 3, step: 0.05 }, true),
+    num('明亮度', () => c.brightness ?? 1, (v) => { c.brightness = v; applyLight(); }, { min: 0.2, max: 3, step: 0.05 }, true),
+    hint('光源照射度：太陽與環境光強度；明亮度：整體曝光。預設 1，遊戲中生效。'),
     h3('顯示'),
     num('剖面高度', () => mv.clip.constant - mv.bounds.min.y, (v) => (mv.clip.constant = mv.bounds.min.y + v), { min: 0.2, max: 6, step: 0.1 }, true),
     text('隱藏(正規式)', () => c.hide, (v) => { c.hide = v; try { applyMapVisibility(); } catch { /* bad regex while typing */ } }),

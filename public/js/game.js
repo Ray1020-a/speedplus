@@ -77,7 +77,7 @@ export class Game {
     this.bounds = { min: box.min.clone(), max: box.max.clone() };
     this.collider = buildCollider(this.mapRoot, mapCfg);
     this.scene.add(this.collider);
-    this.env = createEnvironment(this.renderer, this.scene, this.quality, this.bounds);
+    this.env = createEnvironment(this.renderer, this.scene, this.quality, this.bounds, mapCfg);
     this.composer = createComposer(this.renderer, this.scene, this.camera, this.quality);
 
     // track

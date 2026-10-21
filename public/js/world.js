@@ -52,7 +52,9 @@ export function createRenderer(canvas, quality) {
 }
 
 /** Sky, sun, environment map. Returns handles needed by the game. */
-export function createEnvironment(renderer, scene, quality, bounds) {
+export function createEnvironment(renderer, scene, quality, bounds, cfg = {}) {
+  const light = cfg.light ?? 1, brightness = cfg.brightness ?? 1;
+  renderer.toneMappingExposure = 0.55 * brightness;
   const sky = new Sky();
   sky.scale.setScalar(2000);
   const u = sky.material.uniforms;
@@ -68,11 +70,11 @@ export function createEnvironment(renderer, scene, quality, bounds) {
   const envScene = new THREE.Scene();
   envScene.add(sky.clone());
   scene.environment = pmrem.fromScene(envScene, 0, 0.1, 3000).texture;
-  scene.environmentIntensity = 0.9;
+  scene.environmentIntensity = 0.9 * light;
   scene.fog = new THREE.Fog(0xcfe0f2, 40, 400);
 
-  scene.add(new THREE.HemisphereLight(0xcfe6ff, 0x8a7a66, 0.9));
-  const sun = new THREE.DirectionalLight(0xfff0d8, 3.4);
+  scene.add(new THREE.HemisphereLight(0xcfe6ff, 0x8a7a66, 0.9 * light));
+  const sun = new THREE.DirectionalLight(0xfff0d8, 3.4 * light);
   const size = Math.max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z) * 0.75 + 6;
   const cx = (bounds.max.x + bounds.min.x) / 2, cz = (bounds.max.z + bounds.min.z) / 2;
   sun.position.copy(sunDir).multiplyScalar(size * 2).add(new THREE.Vector3(cx, 0, cz));
