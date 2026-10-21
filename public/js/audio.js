@@ -7,6 +7,7 @@ export class GameAudio {
     this.volume = Number(localStorage.getItem('sp-vol') ?? 0.7);
     this.sample = null;
     this.voices = new Map();
+    this.sm = new WeakMap();
   }
 
   async init() {
@@ -41,6 +42,22 @@ export class GameAudio {
     s.buffer = this.noiseBuf;
     s.loop = loop;
     return s;
+  }
+
+  /**
+   * Per-frame parameter smoothing done in JS. Calling setTargetAtTime every frame piles up automation
+   * events, which WebKit (Safari / every iOS browser) never prunes, so the audio thread and main thread
+   * slow down steadily after the race starts.
+   */
+  smooth(param, target, tc) {
+    const now = this.ctx.currentTime;
+    let st = this.sm.get(param);
+    if (!st) { st = { v: target, t: now }; this.sm.set(param, st); }
+    else {
+      st.v += (target - st.v) * (1 - Math.exp(-Math.max(0, now - st.t) / tc));
+      st.t = now;
+    }
+    param.value = st.v;
   }
 
   setVolume(v) {
@@ -139,22 +156,22 @@ export class GameAudio {
     const f = (rpm / 60) * 3; // V6: 3 firings per revolution
     const k = 0.04;
     if (v.sampleMode) {
-      v.src.playbackRate.setTargetAtTime(Math.max(0.3, rpm / (this.sampleRef || 8000)), t, k);
+      this.smooth(v.src.playbackRate, Math.max(0.3, rpm / (this.sampleRef || 8000)), k);
     } else {
-      v.o1.frequency.setTargetAtTime(f, t, k);
-      v.o2.frequency.setTargetAtTime(f * 2, t, k);
-      v.o3.frequency.setTargetAtTime(f * 0.5, t, k);
+      this.smooth(v.o1.frequency, f, k);
+      this.smooth(v.o2.frequency, f * 2, k);
+      this.smooth(v.o3.frequency, f * 0.5, k);
     }
     const load = 0.35 + 0.65 * throttle;
-    v.lp.frequency.setTargetAtTime(500 + (rpm / v.redline) * 5200 * (0.5 + 0.5 * throttle), t, 0.05);
+    this.smooth(v.lp.frequency, 500 + (rpm / v.redline) * 5200 * (0.5 + 0.5 * throttle), 0.05);
     let g = (0.22 + 0.5 * load) * (0.55 + 0.45 * (rpm / v.redline));
     if (limiter) g *= 0.5 + 0.5 * Math.sign(Math.sin(t * 150)); // fuel-cut chatter
     if (shifting) g *= 0.25;
-    v.out.gain.setTargetAtTime(g * (v.local ? 0.9 : 0.6), t, 0.03);
+    this.smooth(v.out.gain, g * (v.local ? 0.9 : 0.6), 0.03);
     if (v.turbo) {
-      v.turbo.frequency.setTargetAtTime(2000 + rpm * 0.9, t, 0.08);
-      v.turboGain.gain.setTargetAtTime(0.006 + throttle * 0.02, t, 0.1);
-      v.hiss.gain.setTargetAtTime(0.01 + throttle * 0.05 * (rpm / v.redline), t, 0.1);
+      this.smooth(v.turbo.frequency, 2000 + rpm * 0.9, 0.08);
+      this.smooth(v.turboGain.gain, 0.006 + throttle * 0.02, 0.1);
+      this.smooth(v.hiss.gain, 0.01 + throttle * 0.05 * (rpm / v.redline), 0.1);
     }
   }
 
@@ -189,10 +206,10 @@ export class GameAudio {
   updateAmbient(speedKmh, skid) {
     if (!this.wind) return;
     const t = this.ctx.currentTime;
-    this.wind.g.gain.setTargetAtTime(Math.min(0.35, (speedKmh / 300) ** 1.5 * 0.4), t, 0.1);
-    this.wind.f.frequency.setTargetAtTime(400 + speedKmh * 4, t, 0.1);
-    this.skidNode.g.gain.setTargetAtTime(skid * 0.18 * Math.min(1, speedKmh / 40), t, 0.05);
-    this.skidNode.f.frequency.setTargetAtTime(1200 + skid * 800, t, 0.1);
+    this.smooth(this.wind.g.gain, Math.min(0.35, (speedKmh / 300) ** 1.5 * 0.4), 0.1);
+    this.smooth(this.wind.f.frequency, 400 + speedKmh * 4, 0.1);
+    this.smooth(this.skidNode.g.gain, skid * 0.18 * Math.min(1, speedKmh / 40), 0.05);
+    this.smooth(this.skidNode.f.frequency, 1200 + skid * 800, 0.1);
   }
 
   burst(freq, dur, gain, type = 'lowpass') {
