@@ -122,7 +122,10 @@ export function buildCollider(root, cfg) {
     if (skip && (skip.test(o.name) || skip.test(o.material?.name || ''))) return;
     if (o.material?.transparent && o.material.opacity < 0.3) return;
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', o.geometry.attributes.position.clone().applyMatrix4(o.matrixWorld));
+    // copy into float32: optimized (quantized / normalized) models would clamp on applyMatrix4
+    const src = o.geometry.attributes.position, pos = new THREE.Float32BufferAttribute(src.count * 3, 3);
+    for (let i = 0; i < src.count; i++) pos.setXYZ(i, src.getX(i), src.getY(i), src.getZ(i));
+    g.setAttribute('position', pos.applyMatrix4(o.matrixWorld));
     if (o.geometry.index) g.setIndex(o.geometry.index.clone());
     geos.push(g.index ? g : g.toNonIndexed());
   });

@@ -5,7 +5,8 @@
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node --watch server.mjs"
+    "dev": "node --watch server.mjs",
+    "optimize": "node scripts/optimize-models.mjs"
   },
   "repository": {
     "type": "git",
@@ -26,5 +27,8 @@
   },
   "engines": {
     "node": ">=22.13"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.5.1"
   }
 }
