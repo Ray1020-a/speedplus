@@ -696,6 +696,7 @@ function settingsScreen(back = title, parent) {
       ${sw('throttleAssist', '鍵盤油門 / 煞車漸進 (更好控制)', settings.throttleAssist)}
       ${sw('shake', '鏡頭震動', settings.shake)}
       ${sw('dynRes', '動態解析度 (自動維持流暢幀率)', settings.dynRes)}
+      ${sw('debug', '效能資訊 (FPS / 繪製次數 / GPU)', settings.debug)}
       <div class="field"><label>畫質 (變更後重新載入)</label><select id="q">${[['auto', '自動'], ['low', '低 (行動裝置)'], ['medium', '中'], ['high', '高']].map(([v, t]) => `<option value="${v}" ${v === q ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
     </div><div class="spacer"></div><div class="row"><button class="btn" id="b" autofocus>← 返回</button></div></div>`);
   el.querySelector('#vol').oninput = (e) => audio.setVolume(+e.target.value);

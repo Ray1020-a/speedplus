@@ -410,6 +410,7 @@ export class Game {
     this.updateHud(now);
     if (this.mode === 'multi') this.netTick(now);
     this.render();
+    if (settings.debug) this.debugStats(rawDt);
   }
 
   /* ------------------------------------------------------------ progress / race rules */
@@ -680,6 +681,27 @@ export class Game {
     cam.updateProjectionMatrix();
   }
 
+  /** On-screen performance readout (settings → 效能資訊). */
+  debugStats(rawDt) {
+    const r = this.renderer;
+    if (!this.dbg) {
+      this.dbg = document.createElement('pre');
+      this.dbg.style.cssText = 'position:fixed;left:8px;top:8px;margin:0;padding:6px 8px;background:#000a;color:#7dffb0;font:11px/1.35 monospace;z-index:50;pointer-events:none;white-space:pre';
+      document.body.append(this.dbg);
+      r.info.autoReset = false;
+      const gl = r.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
+      this.gpu = (ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'n/a') + ` / WebGL${r.capabilities.isWebGL2 ? 2 : 1}`;
+      this.dbgN = 0; this.dbgT = 0;
+    }
+    this.dbgN++; this.dbgT += rawDt;
+    if (this.dbgT >= 0.5) {
+      const i = r.info, fps = this.dbgN / this.dbgT;
+      this.dbg.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(1)} ms\ncalls ${i.render.calls}  tris ${(i.render.triangles / 1000).toFixed(0)}k\ngeo ${i.memory.geometries}  tex ${i.memory.textures}\nquality ${this.quality}  pr ${r.getPixelRatio().toFixed(2)}  res ${this.res.toFixed(2)}  post ${this.composer ? 'on' : 'off'}\n${this.gpu}`;
+      this.dbgN = 0; this.dbgT = 0;
+    }
+    r.info.reset();
+  }
+
   /** Lowers / raises the render resolution to hold the frame rate. */
   adaptResolution(rawDt) {
     if (!settings.dynRes || this.state === 'loading') return;
@@ -803,6 +825,8 @@ export class Game {
   /* ------------------------------------------------------------ teardown */
   dispose() {
     this.disposed = true;
+    this.dbg?.remove();
+    this.renderer.info.autoReset = true;
     this.renderer.setAnimationLoop(null);
     removeEventListener('resize', this._rs);
     document.removeEventListener('visibilitychange', this._vis);
