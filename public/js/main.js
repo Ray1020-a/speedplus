@@ -193,7 +193,7 @@ function title() {
     </div>
     <div class="spacer"></div>
     ${careerChip()}
-    <div class="row" style="color:var(--dim);font-size:13px"><span id="padinfo"></span><span class="spacer"></span><a href="/admin.html" style="color:var(--dim)">管理後台</a></div>
+    <div class="row" style="color:var(--dim);font-size:13px"><span id="padinfo"></span></div>
   </div>`);
   el.querySelector('#start').onclick = async () => { await audio.init(); if (touch) document.documentElement.requestFullscreen?.().catch(() => {}); if (S.joinCode) S.multi = true; pickChar(); };
   el.querySelector('#rank').onclick = () => rankScreen();
