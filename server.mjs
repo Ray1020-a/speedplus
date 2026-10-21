@@ -8,6 +8,7 @@ import { attachSignaling } from './signaling.mjs';
 
 const ROOT = import.meta.dirname;
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
 const MODELS = process.env.MODELS_DIR || path.join(ROOT, 'models');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
 const KINDS = { car: 'cars', map: 'maps', character: 'characters' };
@@ -166,4 +167,4 @@ app.use(express.static(path.join(ROOT, 'public'), { extensions: ['html'] }));
 
 const server = http.createServer(app);
 attachSignaling(server);
-server.listen(PORT, () => console.log(`speedplus listening on http://localhost:${PORT}`));
+server.listen(PORT, HOST, () => console.log(`speedplus listening on http://${HOST}:${PORT}`));

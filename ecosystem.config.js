@@ -17,10 +17,12 @@ module.exports = {
       env: {
         NODE_ENV: 'development',
         PORT: 3000,
+        HOST: '0.0.0.0',
       },
       env_production: {
         NODE_ENV: 'production',
         PORT: 3000,
+        HOST: '0.0.0.0',
         ADMIN_PASSWORD: 'CHANGE_ME', // 請改掉
         // MODELS_DIR: '/var/lib/speedplus/models',
         // DATA_DIR: '/var/lib/speedplus/data',
