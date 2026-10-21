@@ -682,7 +682,7 @@ export class Game {
 
   /** Lowers / raises the render resolution to hold the frame rate. */
   adaptResolution(rawDt) {
-    if (!settings.dynRes || !this.composer || this.state === 'loading') return;
+    if (!settings.dynRes || this.state === 'loading') return;
     this.ft = this.ft ? this.ft * 0.96 + rawDt * 0.04 : rawDt;
     const now = performance.now();
     if (now - this.resT < 1500 || rawDt > 0.25) return;
@@ -693,7 +693,7 @@ export class Game {
     if (next === this.res) return;
     this.res = next;
     this.renderer.setPixelRatio(this.basePR * next);
-    this.composer.setPixelRatio?.(this.basePR * next);
+    this.composer?.setPixelRatio?.(this.basePR * next);
     this.resize();
   }
 

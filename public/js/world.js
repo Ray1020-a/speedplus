@@ -13,7 +13,8 @@ THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 /** Horizon-style grade: speed radial blur, vignette, warm contrast, slight chromatic aberration. */
-const GradeShader = {
+const gradeShader = (taps) => ({
+  defines: { TAPS: taps },
   uniforms: { tDiffuse: { value: null }, speed: { value: 0 }, time: { value: 0 } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }',
   fragmentShader: /* glsl */`
@@ -23,12 +24,12 @@ const GradeShader = {
       float r = length(c);
       float blur = speed * smoothstep(.15,.75,r) * .045;
       vec3 col = vec3(0.);
-      for(int i=0;i<8;i++){
-        float f = float(i)/7.;
+      for(int i=0;i<TAPS;i++){
+        float f = float(i)/float(TAPS-1);
         vec2 uv = .5 + c * (1. - blur * f);
         col += texture2D(tDiffuse, uv).rgb;
       }
-      col /= 8.;
+      col /= float(TAPS);
       float ca = speed * r * .006;
       col.r = mix(col.r, texture2D(tDiffuse, .5 + c*(1.+ca)).r, .6);
       col.b = mix(col.b, texture2D(tDiffuse, .5 + c*(1.-ca)).b, .6);
@@ -39,11 +40,11 @@ const GradeShader = {
       col *= 1. - smoothstep(.35,.95, r) * (.45 + speed*.25);
       gl_FragColor = vec4(col,1.);
     }`,
-};
+});
 
 export function createRenderer(canvas, quality) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: quality !== 'low', powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, quality === 'high' ? 2 : 1.25));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, quality === 'high' ? 1.5 : 1.25));
   renderer.shadowMap.enabled = quality !== 'low';
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -82,7 +83,8 @@ export function createEnvironment(renderer, scene, quality, bounds, cfg = {}) {
   scene.add(sun.target);
   if (quality !== 'low') {
     sun.castShadow = true;
-    sun.shadow.mapSize.set(quality === 'high' ? 4096 : 2048, quality === 'high' ? 4096 : 2048);
+    const sm = quality === 'high' ? 2048 : 1024;
+    sun.shadow.mapSize.set(sm, sm);
     Object.assign(sun.shadow.camera, { left: -size, right: size, top: size, bottom: -size, near: 1, far: size * 5 });
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
@@ -94,12 +96,12 @@ export function createEnvironment(renderer, scene, quality, bounds, cfg = {}) {
 export function createComposer(renderer, scene, camera, quality) {
   if (quality === 'low') return null;
   const size = renderer.getSize(new THREE.Vector2());
-  const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
+  const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: quality === 'high' ? 4 : 0 });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(size, 0.12, 0.35, 3.0);
+  const bloom = new UnrealBloomPass(quality === 'high' ? size : size.clone().multiplyScalar(0.5), 0.12, 0.35, 3.0);
   composer.addPass(bloom);
-  const grade = new ShaderPass(GradeShader);
+  const grade = new ShaderPass(gradeShader(quality === 'high' ? 8 : 4));
   composer.addPass(grade);
   composer.addPass(new OutputPass());
   composer.grade = grade;
