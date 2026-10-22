@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { api, fmtTime } from './api.js';
-import { Input, isTouchDevice, KEYMAP, PAD_MAP } from './input.js';
+import { Input, isTouchDevice, isWheel, KEYMAP, PAD_MAP, WHEEL_MAP } from './input.js';
 import { GameAudio } from './audio.js';
 import { Hud, esc } from './hud.js';
 import { createRenderer } from './world.js';
@@ -83,18 +83,17 @@ function screen(el, handlers) {
   el.querySelector('[autofocus]')?.focus();
 }
 
-/* Gamepad drives the menus too: D-pad / left stick = arrows, A = confirm, B = back, Start = pause */
+/* Gamepad drives the menus too: D-pad / left stick = arrows, A = confirm, B = back, Start = pause (wheel: D-pad, ✕, ○) */
 const padNext = {};
 function padMenuTick() {
   requestAnimationFrame(padMenuTick);
-  const gp = input.pad != null ? navigator.getGamepads()[input.pad] : null;
+  const gp = input.getPad();
   if (!gp || (game && !game.paused)) return;
-  const b = gp.buttons;
-  const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
+  const p = input.padState(gp);
   const now = {
-    ArrowUp: b[12]?.pressed || ay < -0.6, ArrowDown: b[13]?.pressed || ay > 0.6,
-    ArrowLeft: b[14]?.pressed || ax < -0.6, ArrowRight: b[15]?.pressed || ax > 0.6,
-    Enter: b[0]?.pressed, Escape: b[1]?.pressed,
+    ArrowUp: p.up || p.ly < -0.6, ArrowDown: p.down || p.ly > 0.6,
+    ArrowLeft: p.left || p.lx < -0.6, ArrowRight: p.right || p.lx > 0.6,
+    Enter: p.a, Escape: p.b,
   };
   const t = performance.now();
   for (const k in now) {
@@ -102,7 +101,8 @@ function padMenuTick() {
     const first = !(k in padNext);
     if (!first && (t < padNext[k] || !k.startsWith('Arrow'))) continue;
     padNext[k] = t + (first ? 380 : 120);
-    dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+    // dispatch from the focused element: keyNav reads e.target.matches(), which window does not have
+    (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
   }
 }
 requestAnimationFrame(padMenuTick);
@@ -200,7 +200,7 @@ function title() {
   el.querySelector('#career').onclick = careerScreen;
   el.querySelector('#keys').onclick = () => keysScreen(title);
   el.querySelector('#set').onclick = () => settingsScreen();
-  input.onPad = (on, id) => { const p = el.querySelector('#padinfo'); if (p) p.textContent = on ? `🎮 已連接：${id}` : ''; };
+  input.onPad = (on, id, wheel) => { const p = el.querySelector('#padinfo'); if (p) p.textContent = on ? `${wheel ? '🏎️ 方向盤' : '🎮'} 已連接：${id}` : ''; };
   screen(el, {});
   showCharPreview(S.char);
 }
@@ -491,7 +491,7 @@ async function startMulti(m) {
     game = await createGame({ mode: 'multi', map, car: myCar, character: myChar, mt: me.mt, laps: r.setup.laps, room, players }, progress);
   } catch (e) { console.error(e); room.leave(); room = null; return loadFailed(e); }
   game.initNet();
-  game.waitText = () => (room.isHost ? `已就緒 ${ready.size + 1}/${players.length}　長按 空白鍵 1.5 秒開始比賽` : '');
+  game.waitText = () => (room.isHost ? `已就緒 ${ready.size + 1}/${players.length}　長按 空白鍵 / A / ✕ 1.5 秒開始比賽` : '');
   room.broadcast({ t: 'ready' });
   runGame();
 }
@@ -675,6 +675,7 @@ function keysScreen(back, parent) {
   const el = h(`<div class="screen full" style="${parent ? 'position:fixed;z-index:30;overflow:auto' : ''}"><div class="step">CONTROLS</div><h1 class="title">遊戲鍵位說明</h1>
     <div class="scroll"><h3 style="color:var(--acc)">鍵盤 (電腦)</h3><div class="keys">${KEYMAP.filter((k) => k[0]).map(([a, k]) => `<div><span>${a}</span><kbd>${k}</kbd></div>`).join('')}</div>
     <h3 style="color:var(--acc)">Xbox 手把 (支援震動回饋)</h3><div class="keys">${PAD_MAP.map(([a, k]) => `<div><span>${a}</span><kbd>${k}</kbd></div>`).join('')}</div>
+    <h3 style="color:var(--acc)">方向盤 + 踏板 (Logitech G29 / G923)</h3><div class="keys">${WHEEL_MAP.map(([a, k]) => `<div><span>${a}</span><kbd>${k}</kbd></div>`).join('')}</div>
     <h3 style="color:var(--acc)">手機 / 平板 (橫放)</h3><p style="color:var(--dim)">螢幕左下 ◀ ▶ 轉向；右下為油門、煞車、手煞車；手排時出現升/降檔按鈕；右上可切換視角、重置、暫停。</p></div>
     <div class="spacer"></div><div class="row"><button class="btn" id="b" autofocus>← 返回</button></div></div>`);
   const close = () => { el.remove(); (back || title)(); };
@@ -697,6 +698,8 @@ function settingsScreen(back = title, parent) {
       ${sw('shake', '鏡頭震動', settings.shake)}
       ${sw('dynRes', '動態解析度 (自動維持流暢幀率)', settings.dynRes)}
       ${sw('debug', '效能資訊 (FPS / 繪製次數 / GPU)', settings.debug)}
+      <div class="field"><label>方向盤轉角 (左右打到底) <b id="wlv" style="color:#fff">${settings.wheelLock}°</b></label><input type="range" id="wlock" min="180" max="900" step="30" value="${settings.wheelLock}"></div>
+      <div class="field"><label>方向盤 / 踏板 <b id="wlive" style="color:#fff"></b></label><div class="row" style="margin:0"><button class="btn" id="wcal">重新偵測踏板</button></div></div>
       <div class="field"><label>畫質 (變更後重新載入)</label><select id="q">${[['auto', '自動'], ['low', '低 (行動裝置)'], ['medium', '中'], ['high', '高']].map(([v, t]) => `<option value="${v}" ${v === q ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
     </div><div class="spacer"></div><div class="row"><button class="btn" id="b" autofocus>← 返回</button></div></div>`);
   el.querySelector('#vol').oninput = (e) => audio.setVolume(+e.target.value);
@@ -710,6 +713,30 @@ function settingsScreen(back = title, parent) {
     saveSettings({ [t.id]: on });
   }));
   el.querySelector('#q').onchange = (e) => { localStorage.setItem('sp-quality', e.target.value); location.reload(); };
+  el.querySelector('#wlock').oninput = (e) => { saveSettings({ wheelLock: +e.target.value }); el.querySelector('#wlv').textContent = e.target.value + '°'; };
+  // live wheel readout + pedal detection: press throttle, then brake; the pedal is the axis that moved furthest from rest
+  const live = el.querySelector('#wlive');
+  let calStep = null, rest = null;
+  el.querySelector('#wcal').onclick = () => { const gp = input.getPad(); if (isWheel(gp)) { rest = [...gp.axes]; calStep = 'throttle'; } };
+  const wheelTick = () => {
+    if (!el.isConnected) return;
+    requestAnimationFrame(wheelTick);
+    const gp = input.getPad();
+    if (!isWheel(gp)) { live.textContent = '未偵測到 (先按方向盤上任一鍵)'; calStep = null; return; }
+    if (calStep) {
+      const moved = gp.axes.map((v, i) => (i === 0 || Math.abs(rest[i]) > 1.05 || (calStep === 'brake' && i === settings.wheelAxes.throttle) ? 0 : Math.abs(v - rest[i])));
+      const i = moved.indexOf(Math.max(...moved));
+      if (moved[i] > 1) {
+        saveSettings({ wheelAxes: { ...settings.wheelAxes, [calStep]: i } });
+        calStep = calStep === 'throttle' ? 'brake' : null;
+      }
+      live.textContent = calStep === 'throttle' ? '踩住油門到底…' : calStep === 'brake' ? '油門 OK，放開後踩住煞車到底…' : '';
+      return;
+    }
+    const p = input.padState(gp);
+    live.textContent = `轉向 ${Math.round(p.steer * 100)}%　油門 ${Math.round(p.rt * 100)}%　煞車 ${Math.round(p.lt * 100)}%`;
+  };
+  requestAnimationFrame(wheelTick); // el is attached after this function returns
   const close = () => { el.remove(); back(); };
   el.querySelector('#b').onclick = close;
   if (parent) { parent.append(el); const off = keyNav({ Escape: () => { off(); close(); } }); el.querySelector('#b').onclick = () => { off(); close(); }; el.querySelector('#b').focus(); }
