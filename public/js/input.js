@@ -13,6 +13,21 @@ export const PAD_MAP = [
   ['轉向', '左搖桿 / 十字鍵'], ['加速', 'RT'], ['煞車 / 倒車', 'LT'], ['手煞車', 'A'], ['升檔 / 降檔 (MT)', 'RB / LB'],
   ['切換視角', 'Y'], ['回到賽道', 'X'], ['暫停', 'Start'], ['力回饋', '碰撞、紅線、打滑時震動'],
 ];
+export const WHEEL_MAP = [
+  ['轉向', '方向盤'], ['加速', '油門踏板'], ['煞車 / 倒車', '煞車踏板'], ['手煞車', '✕'], ['升檔 / 降檔 (MT)', '右 / 左撥片'],
+  ['切換視角', '△'], ['回到賽道', '□'], ['暫停', 'OPTIONS'], ['選單', '十字鍵，✕ 確定，○ 返回'],
+];
+
+/** Racing wheels have no standard Gamepad mapping. Layout below is the Logitech G29 / G923 (PlayStation & PC) in Chromium. */
+export const isWheel = (gp) => !!gp && gp.mapping !== 'standard' && /wheel|G29|G9\d\d/i.test(gp.id);
+const WHEEL_BTN = { a: 0, x: 1, b: 2, y: 3, rb: 4, lb: 5, start: 9 }; // ✕ □ ○ △, right / left paddle, OPTIONS
+const WHEEL_HAT = 9; // D-pad is a single POV axis
+/** POV hat axis: -1 = up, then clockwise in steps of 2/7; anything past ±1 means released. */
+function hat(v) {
+  if (v == null || Math.abs(v) > 1.05) return {};
+  const k = Math.round((v + 1) * 3.5) % 8;
+  return { up: k === 7 || k <= 1, right: k >= 1 && k <= 3, down: k >= 3 && k <= 5, left: k >= 5 };
+}
 
 export class Input {
   constructor() {
@@ -29,9 +44,49 @@ export class Input {
     addEventListener('keydown', (e) => this.onKey(e, true));
     addEventListener('keyup', (e) => this.onKey(e, false));
     addEventListener('blur', () => this.keys.clear());
-    addEventListener('gamepadconnected', (e) => { this.pad = e.gamepad.index; this.onPad?.(true, e.gamepad.id); });
+    addEventListener('gamepadconnected', (e) => { this.pad = e.gamepad.index; this.onPad?.(true, e.gamepad.id, isWheel(e.gamepad)); });
     addEventListener('gamepaddisconnected', () => { this.pad = null; this.onPad?.(false); });
-    this.padPrev = [];
+    this.padPrev = {};
+    this.pedalSeen = new Set(); // some browsers report an untouched pedal as 0 (= half pressed) until it first moves
+  }
+
+  /** The controller in use: whichever was pressed last (a wheel can enumerate twice, or sit next to an Xbox pad). */
+  getPad() {
+    const pads = [...navigator.getGamepads()].filter(Boolean);
+    for (const gp of pads) if (gp.index !== this.pad && gp.buttons.some((x) => x.pressed)) this.pad = gp.index;
+    return pads.find((gp) => gp.index === this.pad) || pads[0] || null;
+  }
+
+  /** One controller frame in Xbox terms: lx/ly = left stick (0 on a wheel), steer, rt/lt 0..1, face buttons, D-pad. */
+  padState(gp) {
+    const b = (i) => !!gp.buttons[i]?.pressed;
+    if (isWheel(gp)) {
+      const pedal = (i) => {
+        const v = gp.axes[i];
+        if (v == null) return 0;
+        if (v !== 0) this.pedalSeen.add(i);
+        if (!this.pedalSeen.has(i)) return 0;
+        const p = (1 - v) / 2; // released = 1, floored = -1
+        return p < 0.03 ? 0 : p;
+      };
+      const raw = gp.axes[0] || 0;
+      const d = hat(gp.axes[WHEEL_HAT]);
+      const B = WHEEL_BTN;
+      return {
+        wheel: true, lx: 0, ly: 0, steer: Math.abs(raw) < 0.01 ? 0 : clamp((raw * 900) / settings.wheelLock, -1, 1),
+        rt: pedal(settings.wheelAxes.throttle), lt: pedal(settings.wheelAxes.brake),
+        a: b(B.a), b: b(B.b), x: b(B.x), y: b(B.y), lb: b(B.lb), rb: b(B.rb), start: b(B.start),
+        up: !!d.up, down: !!d.down, left: !!d.left, right: !!d.right,
+      };
+    }
+    const lx = gp.axes[0] || 0, ly = gp.axes[1] || 0;
+    let steer = Math.hypot(lx, ly) < 0.1 ? 0 : lx; // radial dead zone
+    steer = Math.sign(steer) * Math.pow(Math.abs(steer), 1.5) * (1 - 0.25 * this.speedF); // finer centre, calmer at speed
+    return {
+      wheel: false, lx, ly, steer, rt: gp.buttons[7]?.value || 0, lt: gp.buttons[6]?.value || 0,
+      a: b(0), b: b(1), x: b(2), y: b(3), lb: b(4), rb: b(5), start: b(9),
+      up: b(12), down: b(13), left: b(14), right: b(15),
+    };
   }
 
   onKey(e, down) {
@@ -73,31 +128,29 @@ export class Input {
     }
     let steer = this.steer;
 
-    // gamepad
-    const gp = this.pad != null ? navigator.getGamepads()[this.pad] : null;
+    // gamepad / wheel
+    const gp = this.getPad();
     if (gp) {
+      const p = this.padState(gp);
       const prev = this.padPrev;
-      const b = (i) => gp.buttons[i]?.pressed;
-      const edge = (i) => b(i) && !prev[i];
-      const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
-      let sx = Math.hypot(ax, ay) < 0.1 ? 0 : ax; // radial dead zone
-      sx = Math.sign(sx) * Math.pow(Math.abs(sx), 1.5) * (1 - 0.25 * this.speedF); // finer centre, calmer at speed
-      if (b(14)) sx = -1;
-      if (b(15)) sx = 1;
-      const rt = gp.buttons[7]?.value || 0, lt = gp.buttons[6]?.value || 0;
-      if (Math.abs(sx) > 0 || rt > 0.05 || lt > 0.05 || b(0)) this.usingPad = true;
+      const edge = (n) => p[n] && !prev[n];
+      let sx = p.steer;
+      if (p.left) sx = -1;
+      if (p.right) sx = 1;
+      // a wheel never rests at exactly 0, so it needs a small threshold before it takes over from the keyboard
+      if (Math.abs(sx) > (p.wheel ? 0.05 : 0) || p.rt > 0.05 || p.lt > 0.05 || p.a) this.usingPad = true;
       if (this.usingPad) {
         steer = sx;
-        throttle = Math.max(throttle, rt);
-        brake = Math.max(brake, lt);
-        hand = hand || b(0);
+        throttle = Math.max(throttle, p.rt);
+        brake = Math.max(brake, p.lt);
+        hand = hand || p.a;
       }
-      if (edge(5)) this.edge.up = true;
-      if (edge(4)) this.edge.down = true;
-      if (edge(3)) this.edge.view = true;
-      if (edge(2)) this.edge.reset = true;
-      if (edge(9)) this.edge.pause = true;
-      this.padPrev = gp.buttons.map((x) => x.pressed);
+      if (edge('rb')) this.edge.up = true;
+      if (edge('lb')) this.edge.down = true;
+      if (edge('y')) this.edge.view = true;
+      if (edge('x')) this.edge.reset = true;
+      if (edge('start')) this.edge.pause = true;
+      this.padPrev = p;
     }
 
     const out = { throttle, brake, steer: clamp(steer, -1, 1), handbrake: hand, assist: settings.steerAssist, shiftUp: this.edge.up, shiftDown: this.edge.down };
@@ -108,8 +161,7 @@ export class Input {
 
   /** Rumble: strong = low-frequency motor, weak = high-frequency. Works on Xbox pads in Chromium; silently ignored elsewhere. */
   rumble(strong, weak, ms = 80) {
-    const gp = this.pad != null ? navigator.getGamepads()[this.pad] : null;
-    const act = gp?.vibrationActuator;
+    const act = this.getPad()?.vibrationActuator;
     if (act?.playEffect) {
       act.playEffect('dual-rumble', { startDelay: 0, duration: ms, strongMagnitude: clamp(strong, 0, 1), weakMagnitude: clamp(weak, 0, 1) }).catch(() => {});
     }

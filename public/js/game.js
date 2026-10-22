@@ -372,9 +372,9 @@ export class Game {
       const v = this.vehicle;
       v.rpm += (v.idle - v.rpm) * Math.min(1, dt * 4);
       if (this.canStart) {
-        const held = this.input.keys.has('Space') || this.input.touch.hold;
+        const held = inp.handbrake || this.input.touch.hold;
         this.hold = held ? this.hold + dt : Math.max(0, this.hold - dt * 2);
-        this.hud.hold(this.hold / 1.5, this.waitText?.() || '長按 空白鍵 1.5 秒開始');
+        this.hud.hold(this.hold / 1.5, this.waitText?.() || '長按 空白鍵 / A / ✕ 1.5 秒開始');
         if (this.hold >= 1.5) { this.hold = 0; this.hud.hold(null); this.onStartRequest?.(); }
       } else this.hud.hold(0, '等待主辦人開始…', true);
     } else if (this.state === 'countdown') {
