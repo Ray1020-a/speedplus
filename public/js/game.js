@@ -262,7 +262,7 @@ export class Game {
   setupAudio() {
     const a = this.audio;
     if (!a?.ctx) return;
-    this.voice = a.createEngine(true, this.vehicle.redline);
+    this.voice = a.createEngine(true, this.vehicle.cfg);
     a.createAmbient();
     this.nextMuteCheck = 0;
   }
@@ -581,7 +581,7 @@ export class Game {
     if (this.audio?.ctx) {
       near.sort((a, b) => a.dist - b.dist);
       near.forEach((r, i) => {
-        if (i < 3 && !r.voice) r.voice = this.audio.createEngine(false, r.cfg.redline || 12000);
+        if (i < 3 && !r.voice) r.voice = this.audio.createEngine(false, r.cfg);
         if (i >= 3 && r.voice) { this.audio.destroyEngine(r.voice); r.voice = null; }
         if (r.voice) {
           r.voice.panner.positionX.value = r.pos.x; r.voice.panner.positionY.value = r.pos.y; r.voice.panner.positionZ.value = r.pos.z;
@@ -762,15 +762,15 @@ export class Game {
         this.input.buzz(40 + e.power * 120);
       } else if (e.type === 'shift') a?.shift();
     }
-    // turbo flutter / exhaust crackle when lifting off at high revs
-    if (this._thr > 0.8 && inp.throttle < 0.1 && v.rpm > v.redline * 0.6 && v.speedKmh > 40) {
-      a?.burst?.(900, 0.1, 0.16, 'bandpass');
-      setTimeout(() => a?.burst?.(1400, 0.05, 0.1, 'bandpass'), 90);
+    // turbo flutter / exhaust crackle when lifting off at high revs (not on diesels or electrics)
+    if (this.voice?.crackle && this._thr > 0.8 && inp.throttle < 0.1 && v.rpm > v.redline * 0.6 && v.speedKmh > 40) {
+      a?.burst?.(900, 0.1, 0.08, 'bandpass');
+      setTimeout(() => a?.burst?.(1400, 0.05, 0.05, 'bandpass'), 90);
     }
     this._thr = inp.throttle;
     this.shake = Math.max(0, this.shake - dt * 12);
     if (a?.ctx && this.voice) {
-      a.updateEngine(this.voice, v.rpm, this.state === 'countdown' ? inp.throttle : inp.throttle, v.limiter, v.shiftTimer > 0);
+      a.updateEngine(this.voice, v.rpm, v.reversing ? inp.brake : inp.throttle, v.limiter, v.shiftTimer > 0);
       a.updateAmbient(v.speedKmh, v.skid);
       a.setListener(this.camera.position, new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion));
     }

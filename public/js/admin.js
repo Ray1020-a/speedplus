@@ -6,6 +6,7 @@ import { downloadModel, parseGLB } from './loader.js';
 import { buildCar, seatDriver } from './carmodel.js';
 import { makeCharacter } from './characters.js';
 import { Track } from './track.js';
+import { PROFILES, engineProfile } from './audio.js';
 
 const $ = (s) => document.querySelector(s);
 const rad = THREE.MathUtils.degToRad;
@@ -251,7 +252,15 @@ function carPanel() {
     h3('性能'),
     num('馬力倍率', () => c.power, (v) => (c.power = v), { min: 0.2, max: 4, step: 0.05 }),
     num('極速 km/h', () => c.topSpeed, (v) => (c.topSpeed = v), { min: 50, max: 500, step: 5 }),
-    num('紅線 RPM', () => c.redline, (v) => (c.redline = v), { min: 5000, max: 20000, step: 100 }),
+    num('紅線 RPM', () => c.redline, (v) => (c.redline = v), { min: 1500, max: 20000, step: 100 }),
+    row('引擎聲', (() => {
+      const s = el('select');
+      const auto = `自動 (依紅線：${PROFILES[engineProfile({ redline: c.redline })].label})`;
+      [['auto', auto], ...Object.entries(PROFILES).map(([k, p]) => [k, p.label])].forEach(([v, t]) => s.append(el('option', { value: v, textContent: t })));
+      s.value = engineProfile(c) === c.sound?.type ? c.sound.type : 'auto'; // the old 'f1' default on a low redline shows as auto
+      s.onchange = () => { c.sound = { ...c.sound, type: s.value }; };
+      return s;
+    })()),
     el('div', { style: 'margin-top:14px' }, btn('儲存', save, 'pri')),
   );
 }

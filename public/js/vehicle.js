@@ -17,7 +17,7 @@ export class Vehicle {
     this.top = top;
     this.nGears = cfg.gearCount || 8;
     this.redline = cfg.redline || 12000;
-    this.idle = 3500;
+    this.idle = Math.min(3500, this.redline * 0.3); // a bus / diesel redline (2500) sits below a petrol idle
     const ratio = Math.pow(0.24, 1 / (this.nGears - 1));
     this.vmax = Array.from({ length: this.nGears + 1 }, (_, i) => (i === 0 ? 0 : top * Math.pow(ratio, this.nGears - i)));
     this.power = cfg.power || 1;
@@ -97,6 +97,8 @@ export class Vehicle {
   get forward() { return new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)); }
   get speedKmh() { return Math.abs(this.vel.dot(this.forward)) / this.S * KMH; }
   get signedKmh() { return this.vel.dot(this.forward) / this.S * KMH; }
+  /** AT reverse: the brake pedal drives backwards and the throttle brakes */
+  get reversing() { return !this.mt && this.gear === -1; }
 
   /** returns distance to first hit or Infinity */
   cast(origin, dir, far) {
@@ -125,8 +127,8 @@ export class Vehicle {
     const n = this.nGears;
     if (!this.mt) {
       if (this.gear <= 0 && this.gear !== -1) this.gear = 1;
-      if (input.brake > 0.2 && vf < 1 && input.throttle < 0.1) this.gear = -1;
-      else if (this.gear === -1 && input.throttle > 0.2 && vf > -1) this.gear = 1;
+      if (input.brake > 0.2 && vf < 0.3 && input.throttle < 0.1) this.gear = -1; // flip only near a standstill: until then the pedal still brakes
+      else if (this.gear === -1 && input.throttle > 0.2 && vf > -0.3) this.gear = 1;
       if (this.gear > 0 && this.shiftTimer === 0) {
         const ratio = Math.abs(vf) / this.vmax[this.gear];
         if (ratio > (0.9 + 0.05 * input.throttle) && this.gear < n) { this.gear++; this.shiftTimer = 0.12; this.events.push({ type: 'shift' }); }
@@ -137,17 +139,20 @@ export class Vehicle {
       if (input.shiftDown && this.gear > -1) { this.gear--; this.shiftTimer = 0.1; this.events.push({ type: 'shift' }); }
     }
 
+    const thr = this.reversing ? input.brake : input.throttle;
+    const brk = this.reversing ? input.throttle : input.brake;
+
     /* ----- rpm ----- */
     const vmaxG = this.gear > 0 ? this.vmax[this.gear] : this.vmax[1];
     if (this.gear === 0) {
-      this.rpm += ((this.idle + input.throttle * (this.redline - this.idle)) - this.rpm) * Math.min(1, dt * 6);
+      this.rpm += ((this.idle + thr * (this.redline - this.idle)) - this.rpm) * Math.min(1, dt * 6);
     } else {
       const wheelRpm = this.idle + (this.redline - this.idle) * (Math.abs(vf) / vmaxG);
-      const clutch = this.idle + input.throttle * 0.5 * (this.redline - this.idle) * (1 - Math.min(1, Math.abs(vf) / (vmaxG * 0.5)));
+      const clutch = this.idle + thr * 0.5 * (this.redline - this.idle) * (1 - Math.min(1, Math.abs(vf) / (vmaxG * 0.5)));
       const target = Math.max(wheelRpm, clutch);
       this.rpm += (target - this.rpm) * Math.min(1, dt * 14);
     }
-    this.limiter = this.rpm >= this.redline * 0.985 && input.throttle > 0.5;
+    this.limiter = this.rpm >= this.redline * 0.985 && thr > 0.5;
     this.rpm = clamp(this.rpm, this.idle * 0.8, this.redline);
 
     /* ----- longitudinal ----- */
@@ -155,20 +160,20 @@ export class Vehicle {
     const tq = (r) => 0.62 + 0.38 * Math.sin(Math.PI * clamp((r - this.idle * 0.6) / (this.redline * 1.0 - this.idle * 0.6), 0, 1) ** 0.8);
     if (this.gear !== 0 && this.shiftTimer === 0) {
       const dirSign = this.gear === -1 ? -1 : 1;
-      let thrust = input.throttle * tq(this.rpm) * this.A1 * (this.vmax[1] / vmaxG);
+      let thrust = thr * tq(this.rpm) * this.A1 * (this.vmax[1] / vmaxG);
       thrust = Math.min(thrust, 16 * this.power);
       if (this.gear === -1) thrust = Math.min(thrust, 5.5) * 1;
-      const over = this.gear > 0 ? Math.abs(vf) / vmaxG : 0;
+      const over = Math.abs(vf) / (this.gear > 0 ? vmaxG : Math.min(vmaxG, 8)); // reverse tops out near 30 km/h
       if (over > 1 || this.limiter) thrust = 0;
       if (this.gear > 0 && vf < -0.5) thrust = 0; // do not push backwards in forward gear
       a += thrust * dirSign;
       // engine braking when lifted / over-revved
-      if (input.throttle < 0.05 && this.gear > 0) a -= Math.sign(vf) * (0.6 + 2.2 * (Math.abs(vf) / vmaxG)) * Math.min(1, Math.abs(vf));
+      if (thr < 0.05 && this.gear > 0) a -= Math.sign(vf) * (0.6 + 2.2 * (Math.abs(vf) / vmaxG)) * Math.min(1, Math.abs(vf));
       if (over > 1) a -= Math.sign(vf) * (over - 1) * 60;
     }
     a -= this.drag * vf * Math.abs(vf);
     a -= Math.sign(vf) * Math.min(Math.abs(vf) / dt, 0.25);
-    const brake = input.brake * 26 + (input.handbrake ? 9 : 0);
+    const brake = brk * 26 + (input.handbrake ? 9 : 0);
     if (brake > 0 && Math.abs(vf) > 0.01) {
       a -= Math.sign(vf) * Math.min(brake, Math.abs(vf) / dt + 0);
     }

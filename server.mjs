@@ -30,7 +30,7 @@ const defaultCar = (name) => ({
   topSpeed: 340, // km/h
   gearCount: 8,
   redline: 15000,
-  sound: { type: 'f1' },
+  sound: { type: 'auto' }, // see engineProfile() in public/js/audio.js
 });
 const defaultMap = (name) => ({
   name,
