@@ -4,7 +4,7 @@ import { buildCar, seatDriver } from './carmodel.js';
 import { makeCharacter } from './characters.js';
 import { Track } from './track.js';
 import { Vehicle } from './vehicle.js';
-import { createEnvironment, createComposer, buildCollider } from './world.js';
+import { createEnvironment, createComposer, buildCollider, AutoExposure } from './world.js';
 import { fmtTime } from './api.js';
 import { settings } from './settings.js';
 
@@ -84,6 +84,7 @@ export class Game {
     this.scene.add(this.collider);
     this.env = createEnvironment(this.renderer, this.scene, this.quality, this.bounds, mapCfg);
     this.composer = createComposer(this.renderer, this.scene, this.camera, this.quality);
+    this.autoExp = new AutoExposure(this.renderer, this.composer?.bloom, mapCfg.brightness ?? 1);
 
     // track
     this.track = new Track(mapCfg);
@@ -262,7 +263,7 @@ export class Game {
   setupAudio() {
     const a = this.audio;
     if (!a?.ctx) return;
-    this.voice = a.createEngine(true, this.vehicle.redline);
+    this.voice = a.createEngine(true, this.vehicle.cfg);
     a.createAmbient();
     this.nextMuteCheck = 0;
   }
@@ -414,7 +415,7 @@ export class Game {
     this.updateEffects(dt, inp);
     this.updateHud(now);
     if (this.mode === 'multi') this.netTick(now);
-    this.render();
+    this.render(dt);
     if (settings.debug) this.debugStats(rawDt);
   }
 
@@ -581,7 +582,7 @@ export class Game {
     if (this.audio?.ctx) {
       near.sort((a, b) => a.dist - b.dist);
       near.forEach((r, i) => {
-        if (i < 3 && !r.voice) r.voice = this.audio.createEngine(false, r.cfg.redline || 12000);
+        if (i < 3 && !r.voice) r.voice = this.audio.createEngine(false, r.cfg);
         if (i >= 3 && r.voice) { this.audio.destroyEngine(r.voice); r.voice = null; }
         if (r.voice) {
           r.voice.panner.positionX.value = r.pos.x; r.voice.panner.positionY.value = r.pos.y; r.voice.panner.positionZ.value = r.pos.z;
@@ -762,15 +763,15 @@ export class Game {
         this.input.buzz(40 + e.power * 120);
       } else if (e.type === 'shift') a?.shift();
     }
-    // turbo flutter / exhaust crackle when lifting off at high revs
-    if (this._thr > 0.8 && inp.throttle < 0.1 && v.rpm > v.redline * 0.6 && v.speedKmh > 40) {
-      a?.burst?.(900, 0.1, 0.16, 'bandpass');
-      setTimeout(() => a?.burst?.(1400, 0.05, 0.1, 'bandpass'), 90);
+    // turbo flutter / exhaust crackle when lifting off at high revs (not on diesels or electrics)
+    if (this.voice?.crackle && this._thr > 0.8 && inp.throttle < 0.1 && v.rpm > v.redline * 0.6 && v.speedKmh > 40) {
+      a?.burst?.(900, 0.1, 0.08, 'bandpass');
+      setTimeout(() => a?.burst?.(1400, 0.05, 0.05, 'bandpass'), 90);
     }
     this._thr = inp.throttle;
     this.shake = Math.max(0, this.shake - dt * 12);
     if (a?.ctx && this.voice) {
-      a.updateEngine(this.voice, v.rpm, this.state === 'countdown' ? inp.throttle : inp.throttle, v.limiter, v.shiftTimer > 0);
+      a.updateEngine(this.voice, v.rpm, v.reversing ? inp.brake : inp.throttle, v.limiter, v.shiftTimer > 0);
       a.updateAmbient(v.speedKmh, v.skid);
       a.setListener(this.camera.position, new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion));
     }
@@ -822,7 +823,8 @@ export class Game {
     this.composer?.setSize(w, h);
   }
 
-  render() {
+  render(dt = 1 / 60) {
+    this.autoExp?.update(dt, this.scene, this.camera);
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
@@ -850,6 +852,7 @@ export class Game {
       for (const m of mats) { for (const k in m) if (m[k]?.isTexture) m[k].dispose(); m.dispose(); }
     });
     this.composer?.dispose?.();
+    this.autoExp?.dispose();
     this.scene.environment?.dispose?.();
   }
 }
