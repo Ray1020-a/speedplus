@@ -12,7 +12,7 @@ THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-/** Horizon-style grade: speed radial blur, vignette, warm contrast, slight chromatic aberration. */
+/** Horizon-style grade: speed radial blur, vignette, warm contrast, slight chromatic aberration. Runs on tone-mapped sRGB. */
 const gradeShader = (taps) => ({
   defines: { TAPS: taps },
   uniforms: { tDiffuse: { value: null }, speed: { value: 0 }, time: { value: 0 } },
@@ -34,8 +34,8 @@ const gradeShader = (taps) => ({
       col.r = mix(col.r, texture2D(tDiffuse, .5 + c*(1.+ca)).r, .6);
       col.b = mix(col.b, texture2D(tDiffuse, .5 + c*(1.-ca)).b, .6);
       float l = dot(col, vec3(.299,.587,.114));
-      col = mix(vec3(l), col, 1.18);
-      col = (col - .5) * 1.06 + .5;
+      col = mix(vec3(l), col, 1.08);
+      col = clamp((col - .5) * 1.06 + .5, 0., 1.);
       col *= vec3(1.03,1.0,.96);
       col *= 1. - smoothstep(.35,.95, r) * (.45 + speed*.25);
       gl_FragColor = vec4(col,1.);
@@ -55,7 +55,7 @@ export function createRenderer(canvas, quality) {
 /** Sky, sun, environment map. Returns handles needed by the game. */
 export function createEnvironment(renderer, scene, quality, bounds, cfg = {}) {
   const light = cfg.light ?? 1, brightness = cfg.brightness ?? 1;
-  renderer.toneMappingExposure = 0.55 * brightness;
+  renderer.toneMappingExposure = 0.55 * brightness; // starting point; AutoExposure takes over in game
   const sky = new Sky();
   sky.scale.setScalar(2000);
   const u = sky.material.uniforms;
@@ -71,10 +71,11 @@ export function createEnvironment(renderer, scene, quality, bounds, cfg = {}) {
   const envScene = new THREE.Scene();
   envScene.add(sky.clone());
   scene.environment = pmrem.fromScene(envScene, 0, 0.1, 3000).texture;
-  scene.environmentIntensity = 0.9 * light;
+  scene.environmentIntensity = 0.45 * light;
   scene.fog = new THREE.Fog(0xcfe0f2, 40, 400);
 
-  scene.add(new THREE.HemisphereLight(0xcfe6ff, 0x8a7a66, 0.9 * light));
+  // less omnidirectional fill than before: it lit every face equally, flattening interiors and washing them out
+  scene.add(new THREE.HemisphereLight(0xcfe6ff, 0x8a7a66, 0.4 * light));
   const sun = new THREE.DirectionalLight(0xfff0d8, 3.4 * light);
   const size = Math.max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z) * 0.75 + 6;
   const cx = (bounds.max.x + bounds.min.x) / 2, cz = (bounds.max.z + bounds.min.z) / 2;
@@ -88,6 +89,7 @@ export function createEnvironment(renderer, scene, quality, bounds, cfg = {}) {
     Object.assign(sun.shadow.camera, { left: -size, right: size, top: size, bottom: -size, near: 1, far: size * 5 });
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.02;
+    sun.shadow.radius = 3; // softer edges
   }
   scene.add(sun);
   return { sky, sun };
@@ -101,12 +103,60 @@ export function createComposer(renderer, scene, camera, quality) {
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(quality === 'high' ? size : size.clone().multiplyScalar(0.5), 0.12, 0.35, 3.0);
   composer.addPass(bloom);
+  // tone map + sRGB first, then grade: contrast pivots at display mid-grey, not on raw HDR light (which blew highlights out)
+  composer.addPass(new OutputPass());
   const grade = new ShaderPass(gradeShader(quality === 'high' ? 8 : 4));
   composer.addPass(grade);
-  composer.addPass(new OutputPass());
   composer.grade = grade;
   composer.bloom = bloom;
   return composer;
+}
+
+/**
+ * Eye adaptation: a few times a second, render a tiny HDR copy of the view, take its log-average luminance and
+ * ease the exposure so that average lands on mid-grey. Maps are no longer blown out or murky whatever their light
+ * level; the map's brightness setting becomes a bias on top (gentle: sqrt, so 0.2 is about -1.2 EV).
+ */
+export class AutoExposure {
+  constructor(renderer, bloom, brightness = 1) {
+    this.renderer = renderer;
+    this.bloom = bloom;
+    this.bias = Math.sqrt(Math.max(0.05, brightness));
+    this.rt = new THREE.WebGLRenderTarget(32, 18, { type: THREE.HalfFloatType, depthBuffer: true });
+    this.px = new Uint16Array(32 * 18 * 4);
+    this.exposure = renderer.toneMappingExposure;
+    this.target = this.exposure;
+    this.key = 0.16; // log-average scene luminance maps to this before tone mapping (low: these interiors are mostly white walls)
+    this.t = 0;
+  }
+
+  update(dt, scene, camera) {
+    this.t -= dt;
+    if (this.t <= 0) {
+      this.t = 0.35;
+      const r = this.renderer, prevRT = r.getRenderTarget(), prevShadow = r.shadowMap.autoUpdate;
+      r.shadowMap.autoUpdate = false; // reuse this frame's shadow maps
+      r.setRenderTarget(this.rt);
+      r.render(scene, camera);
+      r.setRenderTarget(prevRT);
+      r.shadowMap.autoUpdate = prevShadow;
+      r.readRenderTargetPixels(this.rt, 0, 0, 32, 18, this.px);
+      let sum = 0, n = 0;
+      for (let i = 0; i < this.px.length; i += 4) {
+        const l = 0.2126 * THREE.DataUtils.fromHalfFloat(this.px[i]) + 0.7152 * THREE.DataUtils.fromHalfFloat(this.px[i + 1]) + 0.0722 * THREE.DataUtils.fromHalfFloat(this.px[i + 2]);
+        if (Number.isFinite(l)) { sum += Math.log(1e-4 + l); n++; }
+      }
+      const avg = Math.exp(sum / Math.max(1, n));
+      this.target = THREE.MathUtils.clamp((this.key / avg) * this.bias, 0.05, 4);
+    }
+    // open up slowly, close down faster (like an eye coming out of / into the sun)
+    const tc = this.target > this.exposure ? 1.2 : 0.5;
+    this.exposure += (this.target - this.exposure) * (1 - Math.exp(-dt / tc));
+    this.renderer.toneMappingExposure = this.exposure;
+    if (this.bloom) this.bloom.threshold = 1.2 / this.exposure; // bloom only what ends up near white on screen
+  }
+
+  dispose() { this.rt.dispose(); }
 }
 
 /** keep only triangles whose lowest vertex is below `cutY` (section cut) */

@@ -18,6 +18,7 @@ export class Vehicle {
     this.nGears = cfg.gearCount || 8;
     this.redline = cfg.redline || 12000;
     this.idle = Math.min(3500, this.redline * 0.3); // a bus / diesel redline (2500) sits below a petrol idle
+    this.driftK = cfg.drift ?? (this.redline >= 11000 ? 0.4 : 1); // how easily the rear lets go; race cars sit on downforce
     const ratio = Math.pow(0.24, 1 / (this.nGears - 1));
     this.vmax = Array.from({ length: this.nGears + 1 }, (_, i) => (i === 0 ? 0 : top * Math.pow(ratio, this.nGears - i)));
     this.power = cfg.power || 1;
@@ -193,11 +194,13 @@ export class Vehicle {
     }
     this.steerAngle += (target - this.steerAngle) * Math.min(1, dt * (input.steer === 0 ? 10 : 8));
     let w = (vf * Math.tan(this.steerAngle)) / this.wheelbase;
-    const grip = (2.4 + (speedAbs * speedAbs) * 0.0009) * G * (input.handbrake ? 0.45 : 1); // downforce grows with v^2
+    const grip = (2.4 + (speedAbs * speedAbs) * 0.0009) * G; // downforce grows with v^2
     const need = Math.abs(w * vf);
     let slide = 0;
     if (need > grip) { w *= grip / need; slide = clamp(need / grip - 1, 0, 1); }
-    if (input.handbrake) w *= 1.25;
+    // the rear lets go and the car rotates past its path: handbrake locks it, full throttle at the limit spins it (power oversteer)
+    const loose = input.handbrake ? 1 : thr > 0.6 && this.gear > 0 && speedAbs > 8 ? Math.min(1, slide * 2) * thr * this.driftK : 0;
+    w *= 1 + (input.handbrake ? 0.3 * (0.5 + 0.5 * this.driftK) : 0.5 * loose);
     this.yawRate += (-w - this.yawRate) * Math.min(1, dt * 16);
     this.yaw += this.yawRate * dt;
     // the car's momentum stays put in the world while it yaws; tyre grip then drags it back toward the nose
@@ -207,7 +210,7 @@ export class Vehicle {
     const sp0 = Math.hypot(vf, vl);
     vf = wx * f1.x + wz * f1.z;
     vl = wx * r1.x + wz * r1.z;
-    const lateralGrip = input.handbrake ? 1.6 : 9 - 5 * slide;
+    const lateralGrip = input.handbrake ? 1.6 : (9 - 5 * slide) * (1 - 0.7 * loose);
     const vl0 = vl;
     vl *= Math.exp(-lateralGrip * dt);
     // grip redirects speed rather than deleting it; a little is scrubbed off by the sliding tyres

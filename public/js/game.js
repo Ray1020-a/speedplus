@@ -4,7 +4,7 @@ import { buildCar, seatDriver } from './carmodel.js';
 import { makeCharacter } from './characters.js';
 import { Track } from './track.js';
 import { Vehicle } from './vehicle.js';
-import { createEnvironment, createComposer, buildCollider } from './world.js';
+import { createEnvironment, createComposer, buildCollider, AutoExposure } from './world.js';
 import { fmtTime } from './api.js';
 import { settings } from './settings.js';
 
@@ -84,6 +84,7 @@ export class Game {
     this.scene.add(this.collider);
     this.env = createEnvironment(this.renderer, this.scene, this.quality, this.bounds, mapCfg);
     this.composer = createComposer(this.renderer, this.scene, this.camera, this.quality);
+    this.autoExp = new AutoExposure(this.renderer, this.composer?.bloom, mapCfg.brightness ?? 1);
 
     // track
     this.track = new Track(mapCfg);
@@ -414,7 +415,7 @@ export class Game {
     this.updateEffects(dt, inp);
     this.updateHud(now);
     if (this.mode === 'multi') this.netTick(now);
-    this.render();
+    this.render(dt);
     if (settings.debug) this.debugStats(rawDt);
   }
 
@@ -822,7 +823,8 @@ export class Game {
     this.composer?.setSize(w, h);
   }
 
-  render() {
+  render(dt = 1 / 60) {
+    this.autoExp?.update(dt, this.scene, this.camera);
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
@@ -850,6 +852,7 @@ export class Game {
       for (const m of mats) { for (const k in m) if (m[k]?.isTexture) m[k].dispose(); m.dispose(); }
     });
     this.composer?.dispose?.();
+    this.autoExp?.dispose();
     this.scene.environment?.dispose?.();
   }
 }
