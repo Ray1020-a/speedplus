@@ -109,11 +109,24 @@ export function createComposer(renderer, scene, camera, quality) {
   return composer;
 }
 
+/** keep only triangles whose lowest vertex is below `cutY` (section cut) */
+function cutBelow(g, cutY) {
+  if (cutY === Infinity) return g;
+  const p = g.attributes.position, keep = [];
+  for (let i = 0; i + 2 < p.count; i += 3) {
+    if (Math.min(p.getY(i), p.getY(i + 1), p.getY(i + 2)) >= cutY) continue;
+    for (let j = 0; j < 3; j++) keep.push(p.getX(i + j), p.getY(i + j), p.getZ(i + j));
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(keep, 3));
+  return out;
+}
+
 /**
  * Build a collision-only mesh (positions in world space, double sided) from the map, skipping
  * meshes that are hidden or match `noCollide`, and index it with a BVH.
  */
-export function buildCollider(root, cfg) {
+export function buildCollider(root, cfg, cutY = Infinity) {
   const skip = cfg.noCollide ? new RegExp(cfg.noCollide, 'i') : null;
   const geos = [];
   root.updateMatrixWorld(true);
@@ -127,7 +140,7 @@ export function buildCollider(root, cfg) {
     for (let i = 0; i < src.count; i++) pos.setXYZ(i, src.getX(i), src.getY(i), src.getZ(i));
     g.setAttribute('position', pos.applyMatrix4(o.matrixWorld));
     if (o.geometry.index) g.setIndex(o.geometry.index.clone());
-    geos.push(g.index ? g : g.toNonIndexed());
+    geos.push(cutBelow(g.index ? g.toNonIndexed() : g, cutY));
   });
   const merged = mergeGeometries(geos.map((g) => (g.index ? g.toNonIndexed() : g)), false);
   merged.computeBoundsTree({ targetLeafSize: 12 });

@@ -499,7 +499,7 @@ async function openMap(asset) {
   const box = new THREE.Box3().setFromObject(mv.root);
   mv.bounds = { min: box.min, max: box.max };
   const floorY = box.min.y;
-  mv.clip = new THREE.Plane(new THREE.Vector3(0, -1, 0), floorY + 1.2);
+  mv.clip = new THREE.Plane(new THREE.Vector3(0, -1, 0), floorY + (c.sectionH ?? 1.2));
   renderer.clippingPlanes = [mv.clip];
   ov.style.pointerEvents = 'auto';
   mv.fit();
@@ -537,7 +537,9 @@ function mapPanel(box) {
     num('明亮度', () => c.brightness ?? 1, (v) => { c.brightness = v; applyLight(); }, { min: 0.2, max: 3, step: 0.05 }, true),
     hint('光源照射度：太陽與環境光強度；明亮度：整體曝光。預設 1，遊戲中生效。'),
     h3('顯示'),
-    num('剖面高度', () => mv.clip.constant - mv.bounds.min.y, (v) => (mv.clip.constant = mv.bounds.min.y + v), { min: 0.2, max: 6, step: 0.1 }, true),
+    num('剖面高度 (m)', () => mv.clip.constant - mv.bounds.min.y, (v) => { mv.clip.constant = mv.bounds.min.y + v; if (c.sectionH != null) c.sectionH = v; }, { min: 0.1, max: Math.max(2, Math.ceil(box.max.y - box.min.y)), step: 0.05 }, true),
+    check('遊戲中套用剖面(切掉屋頂)', () => c.sectionH != null, (v) => { c.sectionH = v ? mv.clip.constant - mv.bounds.min.y : null; }),
+    hint('拖曳剖面高度，高於此高度的屋頂/天花板會被切掉；勾選後儲存，遊戲的畫面與碰撞都會套用。'),
     text('隱藏(正規式)', () => c.hide, (v) => { c.hide = v; try { applyMapVisibility(); } catch { /* bad regex while typing */ } }),
     text('不碰撞(正規式)', () => c.noCollide, (v) => (c.noCollide = v)),
     hint('隱藏 = 天花板等；不碰撞 = 玻璃、燈等無需阻擋賽車的物件(名稱含這些字)。'),

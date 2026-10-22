@@ -75,7 +75,12 @@ export class Game {
     this.scene.add(this.mapRoot);
     const box = new THREE.Box3().setFromObject(this.mapRoot);
     this.bounds = { min: box.min.clone(), max: box.max.clone() };
-    this.collider = buildCollider(this.mapRoot, mapCfg);
+    if (mapCfg.sectionH != null) {
+      // section cut: drop everything above floor + sectionH (roofs) from view and collision
+      this.sectionY = box.min.y + mapCfg.sectionH;
+      this.renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), this.sectionY)];
+    }
+    this.collider = buildCollider(this.mapRoot, mapCfg, this.sectionY);
     this.scene.add(this.collider);
     this.env = createEnvironment(this.renderer, this.scene, this.quality, this.bounds, mapCfg);
     this.composer = createComposer(this.renderer, this.scene, this.camera, this.quality);
