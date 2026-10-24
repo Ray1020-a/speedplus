@@ -511,6 +511,17 @@ async function openMap(asset) {
   const floorY = box.min.y;
   mv.clip = new THREE.Plane(new THREE.Vector3(0, -1, 0), floorY + (c.sectionH ?? c.sectionPreview ?? 1.2));
   renderer.clippingPlanes = [mv.clip];
+  mv.ground = new THREE.Mesh(new THREE.PlaneGeometry(box.max.x - box.min.x + 40, box.max.z - box.min.z + 40).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x3cf08a, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
+  mv.ground.position.set((box.min.x + box.max.x) / 2, 0, (box.min.z + box.max.z) / 2);
+  const placeGround = () => {
+    const h = c.groundH ?? c.groundPreview;
+    mv.ground.visible = h != null;
+    mv.ground.position.y = box.min.y + (h ?? 0);
+  };
+  mv.placeGround = placeGround;
+  placeGround();
+  scene.add(mv.ground);
   ov.style.pointerEvents = 'auto';
   mv.fit();
   mapPointer();
@@ -546,6 +557,10 @@ function mapPanel(box) {
     num('光源照射度', () => c.light ?? 1, (v) => { c.light = v; applyLight(); }, { min: 0, max: 3, step: 0.05 }, true),
     num('明亮度', () => c.brightness ?? 1, (v) => { c.brightness = v; applyLight(); }, { min: 0.2, max: 3, step: 0.05 }, true),
     hint('遊戲中會自動曝光 (像眼睛適應光線)，所以不會過亮或過暗。光源照射度：太陽與環境光強度；明亮度：在自動曝光上再調亮或調暗。預設 1。'),
+    h3('地平面'),
+    num('地平面高度 (m)', () => c.groundH ?? c.groundPreview ?? 0, (v) => { c.groundPreview = v; if (c.groundH != null) c.groundH = v; mv.placeGround(); }, { min: -2, max: Math.max(2, Math.ceil(box.max.y - box.min.y)), step: 0.05 }, true),
+    check('啟用地平面(碰撞)', () => c.groundH != null, (v) => { c.groundH = v ? (c.groundPreview ?? 0) : null; mv.placeGround(); }),
+    hint('綠色半透明平面為地平面，高度相對模型最低點。啟用後遊戲中會有一個看不見的地面接住賽車，起點也以此高度為基準；地圖地面在此平面上方時，請調高到路面高度。'),
     h3('顯示'),
     num('剖面高度 (m)', () => mv.clip.constant - mv.bounds.min.y, (v) => { mv.clip.constant = mv.bounds.min.y + v; c.sectionPreview = v; if (c.sectionH != null) c.sectionH = v; }, { min: 0.1, max: Math.max(2, Math.ceil(box.max.y - box.min.y)), step: 0.05 }, true),
     check('遊戲中套用剖面(切掉屋頂)', () => c.sectionH != null, (v) => { c.sectionH = v ? mv.clip.constant - mv.bounds.min.y : null; }),

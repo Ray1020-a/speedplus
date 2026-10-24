@@ -192,6 +192,13 @@ export function buildCollider(root, cfg, cutY = Infinity) {
     if (o.geometry.index) g.setIndex(o.geometry.index.clone());
     geos.push(cutBelow(g.index ? g.toNonIndexed() : g, cutY));
   });
+  if (cfg.groundH != null) {
+    // fixed ground plane: catches the car where the model has holes, and anchors spawning
+    const box = new THREE.Box3().setFromObject(root);
+    const pad = 20, w = box.max.x - box.min.x + pad * 2, d = box.max.z - box.min.z + pad * 2;
+    const pg = new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2).translate((box.min.x + box.max.x) / 2, box.min.y + cfg.groundH, (box.min.z + box.max.z) / 2);
+    geos.push(pg.toNonIndexed());
+  }
   const merged = mergeGeometries(geos.map((g) => (g.index ? g.toNonIndexed() : g)), false);
   merged.computeBoundsTree({ targetLeafSize: 12 });
   const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));

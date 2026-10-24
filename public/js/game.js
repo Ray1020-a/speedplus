@@ -75,6 +75,7 @@ export class Game {
     this.scene.add(this.mapRoot);
     const box = new THREE.Box3().setFromObject(this.mapRoot);
     this.bounds = { min: box.min.clone(), max: box.max.clone() };
+    this.groundBase = box.min.y + (mapCfg.groundH ?? 0); // spawn / track-paint reference height
     if (mapCfg.sectionH != null) {
       // section cut: drop everything above floor + sectionH (roofs) from view and collision
       this.sectionY = box.min.y + mapCfg.sectionH;
@@ -197,9 +198,9 @@ export class Game {
     const ray = new THREE.Raycaster();
     ray.firstHitOnly = true;
     const groundY = (x, z) => {
-      ray.set(new THREE.Vector3(x, this.bounds.min.y + 2.5, z), new THREE.Vector3(0, -1, 0));
+      ray.set(new THREE.Vector3(x, this.groundBase + 2.5, z), new THREE.Vector3(0, -1, 0));
       const h = ray.intersectObject(this.collider, false)[0];
-      return h ? h.point.y + 0.012 : this.bounds.min.y;
+      return h ? h.point.y + 0.012 : this.groundBase;
     };
     const total = t.closed ? t.length : t.length;
     const lines = [];
@@ -289,8 +290,8 @@ export class Game {
     x += -fx * back + rx * lat;
     z += -fz * back + rz * lat;
     v.reset(x, 0, z, yaw);
-    const gy = v.groundAt(x, this.bounds.min.y + 1, z, 2.5);
-    v.pos.y = gy ?? this.bounds.min.y;
+    const gy = v.groundAt(x, this.groundBase + 1, z, 2.5);
+    v.pos.y = gy ?? this.groundBase;
     this.sAbs = t.valid ? t.project(x, z).s : 0;
     this.prevRel = t.valid ? t.rel(this.sAbs) : 0;
     this.P = 0;
