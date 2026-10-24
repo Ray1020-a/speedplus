@@ -405,6 +405,49 @@ function snapGate(name, x, z) {
   c[name] = g;
 }
 
+/**
+ * Smooth a hand-drawn centre line: resample evenly, average each point with its neighbours over a window of about
+ * `strength` track widths (cyclic on a plain circuit, ends pinned on an open / out-and-back line), then thin it out.
+ */
+function smoothTrack(pts, width, cyclic, strength) {
+  if (pts.length < 3) return pts;
+  const P = pts.map(([x, z]) => ({ x, z }));
+  const seg = (a, b) => Math.hypot(b.x - a.x, b.z - a.z);
+  const loop = cyclic ? [...P, P[0]] : P;
+  let len = 0;
+  for (let i = 1; i < loop.length; i++) len += seg(loop[i - 1], loop[i]);
+  if (len < 1e-3) return pts;
+  const d = Math.max(width * 0.25, len / 4000); // resample spacing
+  const n = Math.max(8, Math.round(len / d));
+  const step = len / (cyclic ? n : n - 1);
+  const rs = [];
+  let seg0 = 1, acc = 0, prevAcc = 0;
+  for (let k = 0; k < (cyclic ? n : n); k++) {
+    const target = Math.min(k * step, len);
+    while (seg0 < loop.length - 1 && acc + seg(loop[seg0 - 1], loop[seg0]) < target) { acc += seg(loop[seg0 - 1], loop[seg0]); seg0++; }
+    const a0 = loop[seg0 - 1], b0 = loop[seg0], l = seg(a0, b0) || 1;
+    const f = Math.min(1, Math.max(0, (target - acc) / l));
+    rs.push({ x: a0.x + (b0.x - a0.x) * f, z: a0.z + (b0.z - a0.z) * f });
+    prevAcc = acc;
+  }
+  const w = Math.max(1, Math.round((width * strength) / step)); // half window in samples
+  const out = rs.map((p, i) => {
+    if (!cyclic && (i === 0 || i === rs.length - 1)) return p;
+    let sx = 0, sz = 0, sw = 0;
+    for (let j = -w; j <= w; j++) {
+      let idx = i + j;
+      if (cyclic) idx = (idx + rs.length) % rs.length;
+      else if (idx < 0 || idx >= rs.length) continue;
+      const wt = 1 - Math.abs(j) / (w + 1); // triangular weight
+      sx += rs[idx].x * wt; sz += rs[idx].z * wt; sw += wt;
+    }
+    return { x: sx / sw, z: sz / sw };
+  });
+  const keep = Math.max(1, Math.round((width * 0.8) / step)); // thin out: a point every ~0.8 widths
+  const res = out.filter((_, i) => i % keep === 0 || (!cyclic && i === out.length - 1));
+  return res.map((p) => [+p.x.toFixed(3), +p.z.toFixed(3)]);
+}
+
 function mapPointer() {
   const spacing = () => 0.8; // world units between freehand points
   ov.onpointerdown = (e) => {
@@ -543,6 +586,21 @@ function mapPanel(box) {
     row('', btn('起點方向改回自動', () => { if (c.start) { c.start.manual = false; snapGate('start', c.start.x, c.start.z); } })),
     hint('起點：選取工具下雙擊起點可自由旋轉方向（移動滑鼠、單擊確定）。'),
     hint('畫賽道：在地圖上按住拖曳 (或單擊加點)；沿行駛方向畫。起點/終點會自動吸附到賽道上。'),
+    num('路線優化強度', () => mv.smooth ?? 1.5, (v) => (mv.smooth = v), { min: 0.5, max: 6, step: 0.25 }),
+    row('', btn('路線優化', () => {
+      if (c.track.points.length < 3) return toast('賽道點太少');
+      mv.undoPts = structuredClone(c.track.points);
+      const before = c.track.points.length;
+      c.track.points = smoothTrack(c.track.points, c.track.width, c.circuit && !c.track.pingpong, mv.smooth ?? 1.5);
+      for (const g of ['start', 'finish']) if (c[g]) snapGate(g, c[g].x, c[g].z);
+      toast(`路線已優化 (${before} → ${c.track.points.length} 點)，可按「復原優化」`);
+    }), btn('復原優化', () => {
+      if (!mv.undoPts) return toast('沒有可復原的優化');
+      c.track.points = mv.undoPts; mv.undoPts = null;
+      for (const g of ['start', 'finish']) if (c[g]) snapGate(g, c[g].x, c[g].z);
+      toast('已復原');
+    })),
+    hint('把手繪的歪斜路線抹順並減少點數；數值越大越圓滑，但急彎會被削平。優化後請檢查路線仍在路面上。'),
     row('', btn('清除賽道', () => { c.track.points = []; }), btn('反向', () => { c.track.points.reverse(); if (c.start) snapGate('start', c.start.x, c.start.z); }), btn('縮放全圖', () => mv.fit())),
     h3('賽道'),
     check('環狀賽道', () => c.circuit, (v) => { c.circuit = v; mapPanel(box); }),

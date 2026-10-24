@@ -11,7 +11,7 @@ export const KEYMAP = [
 ];
 export const PAD_MAP = [
   ['轉向', '左搖桿 / 十字鍵'], ['加速', 'RT'], ['煞車 / 倒車', 'LT'], ['手煞車', 'A'], ['升檔 / 降檔 (MT)', 'RB / LB'],
-  ['切換視角', 'Y'], ['回到賽道', 'X'], ['暫停', 'Start'], ['力回饋', '碰撞、紅線、打滑時震動'],
+  ['轉動視角', '右搖桿'], ['切換視角', 'Y'], ['回到賽道', 'X'], ['暫停', 'Start'], ['力回饋', '碰撞、紅線、打滑時震動'],
 ];
 export const WHEEL_MAP = [
   ['轉向', '方向盤'], ['加速', '油門踏板'], ['煞車 / 倒車', '煞車踏板'], ['手煞車', '✕'], ['升檔 / 降檔 (MT)', '右 / 左撥片'],
@@ -83,7 +83,7 @@ export class Input {
     let steer = Math.hypot(lx, ly) < 0.1 ? 0 : lx; // radial dead zone
     steer = Math.sign(steer) * Math.pow(Math.abs(steer), 1.5) * (1 - 0.25 * this.speedF); // finer centre, calmer at speed
     return {
-      wheel: false, lx, ly, steer, rt: gp.buttons[7]?.value || 0, lt: gp.buttons[6]?.value || 0,
+      wheel: false, lx, ly, rx: gp.axes[2] || 0, ry: gp.axes[3] || 0, steer, rt: gp.buttons[7]?.value || 0, lt: gp.buttons[6]?.value || 0,
       a: b(0), b: b(1), x: b(2), y: b(3), lb: b(4), rb: b(5), start: b(9),
       up: b(12), down: b(13), left: b(14), right: b(15),
     };
@@ -153,7 +153,17 @@ export class Input {
       this.padPrev = p;
     }
 
-    const out = { throttle, brake, steer: clamp(steer, -1, 1), handbrake: hand, assist: settings.steerAssist, shiftUp: this.edge.up, shiftDown: this.edge.down };
+    // right stick: look around (standard-mapped pads only; deadzone, then squared for fine control)
+    let look = { x: 0, y: 0 };
+    if (gp) {
+      const q = this.padPrev;
+      const mag = Math.hypot(q.rx || 0, q.ry || 0);
+      if (mag > 0.15) {
+        const s = ((mag - 0.15) / 0.85) ** 2 / mag;
+        look = { x: q.rx * s, y: q.ry * s };
+      }
+    }
+    const out = { look, throttle, brake, steer: clamp(steer, -1, 1), handbrake: hand, assist: settings.steerAssist, shiftUp: this.edge.up, shiftDown: this.edge.down };
     const ev = { ...this.edge };
     this.edge = { up: false, down: false, view: false, reset: false, pause: false, mute: false };
     return { ...out, ev };

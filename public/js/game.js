@@ -363,6 +363,12 @@ export class Game {
     this.input.speedF = clamp(this.vehicle.speedKmh / (this.vehicle.top * 3.6), 0, 1);
     const inp = this.input.read(dt);
     const ev = inp.ev;
+    if (inp.look.x || inp.look.y) { // right stick orbits the camera; it eases back to centre once released
+      const L = this.look;
+      L.yaw = clamp(L.yaw - inp.look.x * 2.6 * dt, -Math.PI, Math.PI);
+      L.pitch = clamp(L.pitch + inp.look.y * 1.6 * dt, -0.5, 0.9);
+      L.idle = 0;
+    }
     if (ev.view) { this.view = (this.view + 1) % VIEWS.length; this.hud.setView(VIEWS[this.view]); this.driver.setHeadVisible(this.view !== 3); }
     if (ev.mute) this.hud.msg(this.audio.toggleMute() ? '靜音' : '音效開啟', '', 800);
     if (ev.pause) this.onPause?.();

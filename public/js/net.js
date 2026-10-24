@@ -1,4 +1,10 @@
-/** Lobby over WebSocket (signaling only) + full-mesh WebRTC data channels for gameplay. */
+/**
+ * Lobby over WebSocket (signaling) + full-mesh WebRTC data channels for gameplay.
+ * If a direct connection cannot be set up (strict NAT, VPN, no TURN server) the peer falls back to relaying through
+ * the lobby WebSocket after RELAY_AFTER_MS, so a room always works; a direct channel that opens later takes over.
+ */
+const RELAY_AFTER_MS = 6000;
+
 export class Room {
   constructor(ice) {
     this.ice = ice;
@@ -60,14 +66,18 @@ export class Room {
       case 'sig':
         this.onSignal(m.from, m.data);
         break;
+      case 'relay': // game data that came through the server instead of a data channel
+        if (this.peers.has(m.from)) this.emit('data', m.from, m.d);
+        break;
     }
   }
 
   /* ---------- WebRTC ---------- */
   makePeer(id) {
     const pc = new RTCPeerConnection({ iceServers: this.ice });
-    const peer = { pc, id, open: false, rel: null, unrel: null, queued: [] };
+    const peer = { pc, id, open: false, relay: false, rel: null, unrel: null, queued: [], timer: null };
     this.peers.set(id, peer);
+    peer.timer = setTimeout(() => this.useRelay(peer), RELAY_AFTER_MS);
     pc.onicecandidate = (e) => e.candidate && this.send({ t: 'sig', to: id, data: { ice: e.candidate } });
     // pre-negotiated channels, identical ids on both sides
     peer.rel = pc.createDataChannel('r', { negotiated: true, id: 0 });
@@ -75,6 +85,7 @@ export class Room {
     const onopen = () => {
       if (!peer.open && peer.rel.readyState === 'open' && peer.unrel.readyState === 'open') {
         peer.open = true;
+        clearTimeout(peer.timer);
         this.emit('peerOpen', id);
       }
     };
@@ -82,9 +93,17 @@ export class Room {
     const onmsg = (e) => { try { this.emit('data', id, JSON.parse(e.data)); } catch { /* ignore */ } };
     peer.rel.onmessage = peer.unrel.onmessage = onmsg;
     pc.onconnectionstatechange = () => {
-      if (['failed', 'closed'].includes(pc.connectionState)) this.dropPeer(id);
+      if (pc.connectionState === 'closed') this.dropPeer(id);
+      else if (pc.connectionState === 'failed') this.useRelay(peer);
     };
     return peer;
+  }
+
+  /** Give up waiting for the direct connection: route this peer's game data through the server. */
+  useRelay(peer) {
+    if (peer.open || peer.relay || !this.peers.has(peer.id)) return;
+    peer.relay = true;
+    this.emit('peerOpen', peer.id);
   }
 
   async connectPeer(id, offerer) {
@@ -116,6 +135,7 @@ export class Room {
     const p = this.peers.get(id);
     if (!p) return;
     this.peers.delete(id);
+    clearTimeout(p.timer);
     try { p.pc.close(); } catch { /* ignore */ }
     this.emit('peerClose', id);
   }
@@ -123,12 +143,17 @@ export class Room {
   /** reliable=false uses the unordered/lossy channel (positions) */
   broadcast(msg, reliable = true) {
     const s = JSON.stringify(msg);
+    const via = [];
     for (const p of this.peers.values()) {
       const ch = reliable ? p.rel : p.unrel;
       if (p.open && ch.readyState === 'open') ch.send(s);
+      else if (p.relay) via.push(p.id);
     }
+    if (via.length) this.send({ t: 'relay', to: via, d: msg });
   }
 
+  /** true once every other player is reachable, directly or through the relay */
+  get allReady() { return [...this.peers.values()].every((p) => p.open || p.relay) && this.peers.size === (this.roster?.players.length ?? 1) - 1; }
   get isHost() { return this.roster?.host === this.id; }
   update(info) { this.send({ t: 'update', ...info }); }
   setup(info) { this.send({ t: 'setup', ...info }); }

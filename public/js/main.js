@@ -375,13 +375,14 @@ function lobby() {
     el.querySelector('#code').textContent = r.code;
     el.querySelector('#pl').innerHTML = `<tr><th>#</th><th>玩家</th><th>賽車</th><th>連線</th></tr>` + r.players.map((p, i) => {
       const car = data.car.find((c) => c.id === p.car);
-      const open = p.id === room.id || room.peers.get(p.id)?.open;
-      return `<tr class="${p.id === room.id ? 'me' : ''}"><td>${i + 1}</td><td>${esc(p.name)}${p.id === r.host ? '<span class="pill">房主</span>' : ''}</td><td>${esc(car?.name || p.car)} ${p.mt ? 'MT' : 'AT'}</td><td>${open ? '<span class="pill ok">已連線</span>' : '<span class="pill no">連線中…</span>'}</td></tr>`;
+      const pe = room.peers.get(p.id);
+      const open = p.id === room.id || pe?.open || pe?.relay;
+      return `<tr class="${p.id === room.id ? 'me' : ''}"><td>${i + 1}</td><td>${esc(p.name)}${p.id === r.host ? '<span class="pill">房主</span>' : ''}</td><td>${esc(car?.name || p.car)} ${p.mt ? 'MT' : 'AT'}</td><td>${open ? `<span class="pill ok">${p.id !== room.id && !pe.open ? '已連線 (中繼)' : '已連線'}</span>` : '<span class="pill no">連線中…</span>'}</td></tr>`;
     }).join('');
     const hb = el.querySelector('#hostbox');
     const info = `<div style="color:var(--dim);margin-bottom:8px">地圖：<b style="color:#fff">${esc(map?.name || r.setup.map)}</b>　圈數：<b style="color:#fff">${r.setup.laps}</b>　人數 ${r.players.length}/16</div>`;
     if (room.isHost) {
-      hb.innerHTML = info + `<div class="row"><label style="color:var(--dim)">圈數</label><input type="number" id="laps" min="1" max="20" value="${r.setup.laps}" style="width:90px"><button class="btn" id="go" ${r.players.length < 2 ? 'disabled' : ''}>開始比賽</button></div>${r.players.length < 2 ? '<div style="color:var(--dim);font-size:13px;margin-top:6px">至少 2 人才能開局</div>' : ''}`;
+      hb.innerHTML = info + `<div class="row"><label style="color:var(--dim)">圈數</label><input type="number" id="laps" min="1" max="20" value="${r.setup.laps}" style="width:90px"><button class="btn" id="go" ${r.players.length < 2 || !room.allReady ? 'disabled' : ''}>開始比賽</button></div>${r.players.length < 2 ? '<div style="color:var(--dim);font-size:13px;margin-top:6px">至少 2 人才能開局</div>' : !room.allReady ? '<div style="color:var(--dim);font-size:13px;margin-top:6px">等待所有玩家連線…</div>' : ''}`;
       hb.querySelector('#laps').onchange = (e) => room.setup({ laps: +e.target.value });
       hb.querySelector('#go')?.addEventListener('click', () => room.startRace());
     } else hb.innerHTML = info + '<div style="color:var(--acc)">等待房主開始比賽…</div>';

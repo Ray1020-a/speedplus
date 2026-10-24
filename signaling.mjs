@@ -76,6 +76,11 @@ export function attachSignaling(server) {
       if (m.t === 'sig') { // relay SDP / ICE to one peer
         const to = room.members.get(m.to);
         if (to) send(to.ws, { t: 'sig', from: me, data: m.data });
+      } else if (m.t === 'relay') { // game data for peers we have no direct channel to
+        for (const id of Array.isArray(m.to) ? m.to : []) {
+          const to = room.members.get(id);
+          if (to && id !== me) send(to.ws, { t: 'relay', from: me, d: m.d });
+        }
       } else if (m.t === 'update') { // own car/character/transmission change
         const info = room.members.get(me).info;
         for (const k of ['car', 'character']) if (typeof m[k] === 'string') info[k] = m[k];

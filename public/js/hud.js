@@ -181,12 +181,18 @@ export class Hud {
     c.clearRect(0, 0, W, W);
     if (!track?.valid) return;
     const pad = 18;
-    const sx = (W - pad * 2) / (bounds.max.x - bounds.min.x);
-    const sz = (W - pad * 2) / (bounds.max.z - bounds.min.z);
-    const k = Math.min(sx, sz);
-    const ox = pad + ((W - pad * 2) - (bounds.max.x - bounds.min.x) * k) / 2;
-    const oz = pad + ((W - pad * 2) - (bounds.max.z - bounds.min.z) * k) / 2;
-    const P = (x, z) => [ox + (x - bounds.min.x) * k, oz + (z - bounds.min.z) * k];
+    // frame the route itself, not the whole map (a long thin route on a huge map would be a speck)
+    if (track._mmFor !== track.pts) {
+      const xs = track.pts.map((p) => p.x), zs = track.pts.map((p) => p.z);
+      track._mmFor = track.pts;
+      track._mm = { x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) };
+    }
+    const { x0, x1, z0, z1 } = track._mm;
+    const w = Math.max(x1 - x0, 1), h = Math.max(z1 - z0, 1);
+    const k = Math.min((W - pad * 2) / w, (W - pad * 2) / h);
+    const ox = pad + ((W - pad * 2) - w * k) / 2;
+    const oz = pad + ((W - pad * 2) - h * k) / 2;
+    const P = (x, z) => [ox + (x - x0) * k, oz + (z - z0) * k];
     c.lineJoin = c.lineCap = 'round';
     c.beginPath();
     track.pts.forEach((p, i) => { const [x, y] = P(p.x, p.z); i ? c.lineTo(x, y) : c.moveTo(x, y); });
