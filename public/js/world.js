@@ -197,7 +197,9 @@ export function buildCollider(root, cfg, cutY = Infinity) {
     const box = new THREE.Box3().setFromObject(root);
     const pad = 20, w = box.max.x - box.min.x + pad * 2, d = box.max.z - box.min.z + pad * 2;
     const pg = new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2).translate((box.min.x + box.max.x) / 2, box.min.y + cfg.groundH, (box.min.z + box.max.z) / 2);
-    geos.push(pg.toNonIndexed());
+    const flat = new THREE.BufferGeometry(); // position only, like the map geometry, or the merge below fails
+    flat.setAttribute('position', pg.toNonIndexed().attributes.position);
+    geos.push(flat);
   }
   const merged = mergeGeometries(geos.map((g) => (g.index ? g.toNonIndexed() : g)), false);
   merged.computeBoundsTree({ targetLeafSize: 12 });

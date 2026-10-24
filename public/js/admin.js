@@ -6,6 +6,7 @@ import { downloadModel, parseGLB } from './loader.js';
 import { buildCar, seatDriver } from './carmodel.js';
 import { makeCharacter } from './characters.js';
 import { Track } from './track.js';
+import { buildCollider } from './world.js';
 import { PROFILES, engineProfile } from './audio.js';
 
 const $ = (s) => document.querySelector(s);
@@ -559,6 +560,14 @@ function mapPanel(box) {
     hint('遊戲中會自動曝光 (像眼睛適應光線)，所以不會過亮或過暗。光源照射度：太陽與環境光強度；明亮度：在自動曝光上再調亮或調暗。預設 1。'),
     h3('地平面'),
     num('地平面高度 (m)', () => c.groundH ?? c.groundPreview ?? 0, (v) => { c.groundPreview = v; if (c.groundH != null) c.groundH = v; mv.placeGround(); }, { min: -2, max: Math.max(2, Math.ceil(box.max.y - box.min.y)), step: 0.05 }, true),
+    row('', btn('自動偵測地平面', () => {
+      const h = detectGround(c, box);
+      if (h == null) return toast('偵測不到地面');
+      c.groundPreview = c.groundH = h;
+      mv.placeGround();
+      mapPanel(box);
+      toast(`地平面 ${h.toFixed(2)} m (記得儲存)`);
+    })),
     check('啟用地平面(碰撞)', () => c.groundH != null, (v) => { c.groundH = v ? (c.groundPreview ?? 0) : null; mv.placeGround(); }),
     hint('綠色半透明平面為地平面，高度相對模型最低點。啟用後遊戲中會有一個看不見的地面接住賽車，起點也以此高度為基準；地圖地面在此平面上方時，請調高到路面高度。'),
     h3('顯示'),
@@ -570,6 +579,42 @@ function mapPanel(box) {
     hint('隱藏 = 天花板等；不碰撞 = 玻璃、燈等無需阻擋賽車的物件(名稱含這些字)。'),
     el('div', { style: 'margin-top:14px' }, btn('儲存', save, 'pri')),
   );
+}
+
+/**
+ * Find the ground height (relative to the model's lowest point): cast down over the track points if there are
+ * any, else over a grid of the map. Upward-facing hits are binned; the lowest bin with a large share wins
+ * (roofs are big and flat too, but they sit above the road).
+ */
+function detectGround(c, box) {
+  const col = buildCollider(mv.root, { noCollide: c.noCollide });
+  const ray = new THREE.Raycaster();
+  const down = new THREE.Vector3(0, -1, 0);
+  const pts = [];
+  const tp = c.track?.points || [];
+  if (tp.length >= 2) {
+    const t = new Track(c);
+    if (t.valid) for (let s = 0; s < t.length; s += Math.max(0.3, t.length / 400)) { const p = t.at(s); pts.push([p.x, p.z]); }
+  }
+  const fromTrack = pts.length > 0;
+  if (!fromTrack) {
+    const N = 70;
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) pts.push([box.min.x + (box.max.x - box.min.x) * (i + 0.5) / N, box.min.z + (box.max.z - box.min.z) * (j + 0.5) / N]);
+  }
+  const bin = 0.05, hist = new Map();
+  for (const [x, z] of pts) {
+    ray.set(new THREE.Vector3(x, box.max.y + 1, z), down);
+    for (const h of ray.intersectObject(col, false)) {
+      if (!h.face || h.face.normal.y < 0.7) continue;
+      const k = Math.round((h.point.y - box.min.y) / bin);
+      hist.set(k, (hist.get(k) || 0) + 1);
+    }
+  }
+  col.geometry.dispose();
+  if (!hist.size) return null;
+  const max = Math.max(...hist.values());
+  const k = Math.min(...[...hist].filter(([, n]) => n >= max * (fromTrack ? 0.5 : 0.4)).map(([key]) => key));
+  return Math.max(0, k * bin);
 }
 
 /* ---------- records ---------- */
