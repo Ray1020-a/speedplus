@@ -6,7 +6,7 @@ import { downloadModel, parseGLB } from './loader.js';
 import { buildCar, seatDriver } from './carmodel.js';
 import { makeCharacter } from './characters.js';
 import { Track } from './track.js';
-import { buildCollider } from './world.js';
+import { buildCollider, createEnvironment } from './world.js';
 import { PROFILES, engineProfile } from './audio.js';
 
 const $ = (s) => document.querySelector(s);
@@ -557,6 +557,15 @@ function mapPanel(box) {
     h3('光照'),
     num('光源照射度', () => c.light ?? 1, (v) => { c.light = v; applyLight(); }, { min: 0, max: 3, step: 0.05 }, true),
     num('明亮度', () => c.brightness ?? 1, (v) => { c.brightness = v; applyLight(); }, { min: 0.2, max: 3, step: 0.05 }, true),
+    row('', btn('自動調整光照', () => {
+      const r = autoLight(c, box);
+      if (!r) return toast('無法量測光照');
+      c.brightness = +r.brightness.toFixed(2);
+      c.light = 1;
+      applyLight();
+      mapPanel(box);
+      toast(`明亮度 ${c.brightness} (亮部/平均 ${(r.p98 / r.avg).toFixed(1)}×，記得儲存)`);
+    })),
     hint('遊戲中會自動曝光 (像眼睛適應光線)，所以不會過亮或過暗。光源照射度：太陽與環境光強度；明亮度：在自動曝光上再調亮或調暗。預設 1。'),
     h3('地平面'),
     num('地平面高度 (m)', () => c.groundH ?? c.groundPreview ?? 0, (v) => { c.groundPreview = v; if (c.groundH != null) c.groundH = v; mv.placeGround(); }, { min: -2, max: Math.max(2, Math.ceil(box.max.y - box.min.y)), step: 0.05 }, true),
@@ -579,6 +588,65 @@ function mapPanel(box) {
     hint('隱藏 = 天花板等；不碰撞 = 玻璃、燈等無需阻擋賽車的物件(名稱含這些字)。'),
     el('div', { style: 'margin-top:14px' }, btn('儲存', save, 'pri')),
   );
+}
+
+/**
+ * Pick the map's brightness bias by measuring it. Renders the map from the driver's eye along the track with the
+ * game's own lighting, then mimics the game's auto exposure (log-average luminance -> mid grey) and lowers the
+ * bias until the brightest 2% of pixels no longer pass white. Baked-light models + game sun end up over-exposed
+ * otherwise; note that auto exposure cancels a pure light scale, so brightness is the lever that matters.
+ */
+function autoLight(c, box) {
+  const S = c.carScale || 0.25, KEY = 0.16; // KEY: AutoExposure.key in world.js
+  const floorY = box.min.y + (c.groundH ?? c.groundPreview ?? 0);
+  const views = [];
+  const t = new Track(c);
+  if (t.valid) {
+    for (let i = 0; i < 16; i++) {
+      const s = (t.length * i) / 16, p = t.at(s);
+      views.push({ x: p.x, z: p.z, dx: p.dx, dz: p.dz });
+    }
+  } else {
+    const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2, r = Math.min(box.max.x - box.min.x, box.max.z - box.min.z) / 4;
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; views.push({ x: cx + Math.cos(a) * r, z: cz + Math.sin(a) * r, dx: -Math.cos(a), dz: -Math.sin(a) }); }
+  }
+  const tmp = new THREE.Scene();
+  const prevExp = renderer.toneMappingExposure, prevClip = renderer.clippingPlanes;
+  createEnvironment(renderer, tmp, 'low', { min: box.min, max: box.max }, { light: c.light ?? 1 });
+  tmp.add(mv.root.clone(true));
+  renderer.clippingPlanes = c.sectionH != null ? [mv.clip] : [];
+  const W = 64, H = 36, rt = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: true });
+  const px = new Uint16Array(W * H * 4);
+  const cam = new THREE.PerspectiveCamera(75, W / H, 0.05 * S, 4000);
+  const lums = [];
+  try {
+    for (const v of views) {
+      const len = Math.hypot(v.dx, v.dz) || 1;
+      cam.position.set(v.x, floorY + 5 * S, v.z);
+      cam.lookAt(v.x + (v.dx / len) * 20 * S, floorY + 2 * S, v.z + (v.dz / len) * 20 * S);
+      cam.updateMatrixWorld();
+      renderer.setRenderTarget(rt);
+      renderer.render(tmp, cam);
+      renderer.readRenderTargetPixels(rt, 0, 0, W, H, px);
+      for (let i = 0; i < px.length; i += 4) {
+        const d = THREE.DataUtils.fromHalfFloat;
+        const l = 0.2126 * d(px[i]) + 0.7152 * d(px[i + 1]) + 0.0722 * d(px[i + 2]);
+        if (Number.isFinite(l)) lums.push(l);
+      }
+    }
+  } finally {
+    renderer.setRenderTarget(null);
+    renderer.toneMappingExposure = prevExp;
+    renderer.clippingPlanes = prevClip;
+    rt.dispose();
+    tmp.environment?.dispose();
+  }
+  if (!lums.length) return null;
+  const avg = Math.exp(lums.reduce((a, l) => a + Math.log(1e-4 + l), 0) / lums.length);
+  lums.sort((x, y) => x - y);
+  const p98 = lums[Math.floor(lums.length * 0.98)];
+  const bias = Math.min(1.2, avg / (KEY * p98)); // exposure = KEY/avg*bias, keep p98*exposure <= 1
+  return { brightness: THREE.MathUtils.clamp(bias * bias, 0.2, 1.4), avg, p98 };
 }
 
 /**
